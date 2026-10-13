@@ -499,8 +499,7 @@ class ExpandedCoverage(unittest.TestCase):
         self.assertEqual(resultEmpty, expected)
         os.chdir('..')
 
-    # https://github.com/noahmorrison/chevron/pull/94
-    def test_keep(self):
+    def test_missing_values_render_empty(self):
         args = {
             'template': '{{ first }} {{ second }} {{ third }}',
             'data': {
@@ -513,24 +512,7 @@ class ExpandedCoverage(unittest.TestCase):
         expected = '1st  3rd'
         self.assertEqual(result, expected)
 
-        args['keep'] = True
-
-        result = chevron.render(**args)
-        expected = '1st {{ second }} 3rd'
-        self.assertEqual(result, expected)
-
-        args['template'] = '{{first}} {{second}} {{third}}'
-        result = chevron.render(**args)
-        expected = '1st {{ second }} 3rd'
-        self.assertEqual(result, expected)
-
-        args['template'] = '{{   first    }} {{    second    }} {{    third   }}'
-        result = chevron.render(**args)
-        expected = '1st {{ second }} 3rd'
-        self.assertEqual(result, expected)
-
-    # https://github.com/noahmorrison/chevron/pull/94
-    def test_keep_from_partials(self):
+    def test_missing_partial_values_render_empty(self):
         args = {
             'template': '{{ first }} {{> with_missing_key }} {{ third }}',
             'data': {
@@ -546,12 +528,10 @@ class ExpandedCoverage(unittest.TestCase):
         expected = '1st  3rd'
         self.assertEqual(result, expected)
 
-        args['keep'] = True
+    def test_builtin_attributes_are_not_template_values(self):
+        result = chevron.render('{{title}}', 'an ordinary string')
 
-        result = chevron.render(**args)
-        expected = '1st {{ missing_key }} 3rd'
-        self.assertEqual(result, expected)
-
+        self.assertEqual(result, '')
 
 # Run unit tests from command line
 if __name__ == "__main__":
