@@ -1,8 +1,6 @@
 [![PyPI version](https://badge.fury.io/py/chevron.svg)](https://badge.fury.io/py/chevron)
-[![Build Status](https://travis-ci.org/noahmorrison/chevron.svg?branch=master)](https://travis-ci.org/noahmorrison/chevron)
-[![Coverage Status](https://coveralls.io/repos/github/noahmorrison/chevron/badge.svg?branch=master)](https://coveralls.io/github/noahmorrison/chevron?branch=master)
 
-A python implementation of the [mustache templating language](http://mustache.github.io).
+A Python implementation of the [Mustache templating language](https://mustache.github.io).
 
 Why chevron?
 ------------
@@ -14,19 +12,21 @@ I'm glad you asked!
 Chevron runs in less than half the time of [pystache](http://github.com/defunkt/pystache) (Which is not even up to date on the spec).
 And in about 70% the time of [Stache](https://github.com/hyperturtle/Stache) (A 'trimmed' version of mustache, also not spec compliant).
 
-### chevron is pep8 ###
+### chevron is consistently formatted ###
 
-The flake8 command is run by [travis](https://travis-ci.org/noahmorrison/chevron) to ensure consistency.
+[Ruff](https://docs.astral.sh/ruff/) checks and formats the codebase, and
+[ty](https://docs.astral.sh/ty/) checks the library's types.
 
 ### chevron is spec compliant ###
 
-Chevron passes all the unittests provided by the [spec](https://github.com/mustache/spec) (in every version listed below).
+Chevron includes a pinned copy of the [Mustache specification](https://github.com/mustache/spec)
+fixtures, including lambda cases. See the fixture [attribution README](tests/fixtures/mustache-spec/README.md).
 
-If you find a test that chevron does not pass, please [report it.](https://github.com/noahmorrison/chevron/issues/new)
+If you find a test that Chevron does not pass, please [report it](https://github.com/deeprave/chevron/issues/new).
 
-### chevron is Python 2 and 3 compatible ###
+### chevron supports modern Python ###
 
-Python 2.6, 2.7, 3.2, 3.3, 3.4, 3.5, and 3.6 are all tested by travis.
+Chevron requires Python 3.11 or later.
 
 
 
@@ -61,28 +61,22 @@ Python usage with strings
 ```python
 import chevron
 
-chevron.render('Hello, {{ mustache }}!', {'mustache': 'World'})
+chevron.render("Hello, {{ mustache }}!", {"mustache": "World"})
 ```
 
 Python usage with file
 ```python
 import chevron
 
-with open('file.mustache', 'r') as f:
-    chevron.render(f, {'mustache': 'World'})
+with open("file.mustache", "r") as f:
+    chevron.render(f, {"mustache": "World"})
 ```
 
 Python usage with unpacking
 ```python
 import chevron
 
-args = {
-  'template': 'Hello, {{ mustache }}!',
-
-  'data': {
-    'mustache': 'World'
-  }
-}
+args = {"template": "Hello, {{ mustache }}!", "data": {"mustache": "World"}}
 
 chevron.render(**args)
 ```
@@ -91,13 +85,7 @@ chevron supports partials (via dictionaries)
 ```python
 import chevron
 
-args = {
-    'template': 'Hello, {{> thing }}!',
-
-    'partials_dict': {
-        'thing': 'World'
-    }
-}
+args = {"template": "Hello, {{> thing }}!", "partials_dict": {"thing": "World"}}
 
 chevron.render(**args)
 ```
@@ -107,13 +95,11 @@ chevron supports partials (via the filesystem)
 import chevron
 
 args = {
-    'template': 'Hello, {{> thing }}!',
-
+    "template": "Hello, {{> thing }}!",
     # defaults to .
-    'partials_path': 'partials/',
-
+    "partials_path": "partials/",
     # defaults to mustache
-    'partials_ext': 'ms',
+    "partials_ext": "ms",
 }
 
 # ./partials/thing.ms will be read and rendered
@@ -124,24 +110,21 @@ chevron supports lambdas
 ```python
 import chevron
 
+
 def first(text, render):
-    # return only first occurance of items
+    # Return only the first occurrence of items.
     result = render(text)
-    return [ x.strip() for x in result.split(" || ") if x.strip() ][0]
+    return [x.strip() for x in result.split(" || ") if x.strip()][0]
+
 
 def inject_x(text, render):
     # inject data into scope
-    return render(text, {'x': 'data'})
+    return render(text, {"x": "data"})
+
 
 args = {
-    'template': 'Hello, {{# first}} {{x}} || {{y}} || {{z}} {{/ first}}!  {{# inject_x}} {{x}} {{/ inject_x}}',
-
-    'data': {
-        'y': 'foo',
-        'z': 'bar',
-        'first': first,
-        'inject_x': inject_x
-    }
+    "template": "Hello, {{# first}} {{x}} || {{y}} || {{z}} {{/ first}}!  {{# inject_x}} {{x}} {{/ inject_x}}",
+    "data": {"y": "foo", "z": "bar", "first": first, "inject_x": inject_x},
 }
 
 chevron.render(**args)
@@ -152,12 +135,7 @@ INSTALL
 
 - with git
 ```
-$ git clone https://github.com/noahmorrison/chevron.git
-```
-
-or using submodules
-```
-$ git submodules add https://github.com/noahmorrison/chevron.git
+$ git clone https://github.com/deeprave/chevron.git
 ```
 
 Also available on pypi!
