@@ -155,12 +155,10 @@ class TestRegressions(unittest.TestCase):
             "data": {"foo": "xx"},
         }
 
-        # self.assertRaisesRegex does not exist in python2.6
-        for _ in range(10):
-            try:
-                chevron.render(**args)
-            except chevron.ChevronError as error:
-                self.assertEqual(error.msg, "unclosed tag at line 3")
+        with self.assertRaises(chevron.ChevronError) as error:
+            chevron.render(**args)
+
+        self.assertEqual(error.exception.msg, "unclosed tag at line 3")
 
     def test_no_opening_tag(self):
         args = {
@@ -168,15 +166,13 @@ class TestRegressions(unittest.TestCase):
             "data": {"foo": "xx"},
         }
 
-        try:
+        with self.assertRaises(chevron.ChevronError) as error:
             chevron.render(**args)
-        except chevron.ChevronError as error:
-            self.assertEqual(
-                error.msg,
-                'Trying to close tag "closing_tag"\n'
-                "Looks like it was not opened.\n"
-                "line 2",
-            )
+
+        self.assertEqual(
+            error.exception.msg,
+            'Trying to close tag "closing_tag"\nLooks like it was not opened.\nline 2',
+        )
 
     # https://github.com/noahmorrison/chevron/issues/17
     def test_callable_1(self):

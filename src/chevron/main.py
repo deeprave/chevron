@@ -63,7 +63,7 @@ def cli_main():
         dest="data",
         help="The json data file",
         type=is_file_or_pipe,
-        default={},
+        default=None,
     )
 
     parser.add_argument(
