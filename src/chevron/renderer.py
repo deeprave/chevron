@@ -2,7 +2,6 @@ from os import linesep, path
 
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from types import MethodType
 
 from .tokenizer import tokenize
 
@@ -132,16 +131,9 @@ def _get_partial(name, partials_dict, partials_path, partials_ext):
             return ""
 
 
-@dataclass(frozen=True)
-class _LambdaDefinition:
-    """A callable that Chevron is permitted to invoke as a section lambda."""
-
-    callable: Callable
-
-
 @dataclass
 class _RenderContext:
-    """The scopes and authorised section lambdas for one rendering operation."""
+    """The scopes and configured section lambdas for one rendering operation."""
 
     scopes: list
     lambdas: dict | None
@@ -157,13 +149,11 @@ class _RenderContext:
                     "lambdas must be a mapping of section names to callables"
                 )
 
-            explicit_lambdas = {
-                name: _LambdaDefinition(value) for name, value in lambdas.items()
-            }
+            explicit_lambdas = dict(lambdas)
             for name, definition in explicit_lambdas.items():
                 if not isinstance(name, str):
                     raise TypeError("lambdas mapping keys must be strings")
-                if not isinstance(definition.callable, Callable):
+                if not isinstance(definition, Callable):
                     raise TypeError("lambdas mapping values must be callable")
         return cls(render_scopes, explicit_lambdas)
 
@@ -187,48 +177,27 @@ class _RenderContext:
         )
 
     def lookup(self, key, warn=False):
-        return _get_key(
+        value = _get_key(
             key,
             self.scopes,
             warn=warn,
             allow_callable_traversal=self.allows_callable_traversal,
         )
 
-    def permits_lambda(self, name, value):
-        return self.lambda_rejection_reason(name, value) is None
+        if self.lambdas is not None and isinstance(value, Callable):
+            if warn:
+                self.warn_rejected_callable_data(key)
+            return ""
+        return value
 
-    def lambda_rejection_reason(self, name, value):
-        lambdas = self.lambdas
-        if lambdas is None:
+    def lambda_for(self, key):
+        if self.lambdas is None:
             return None
+        return self.lambdas.get(key)
 
-        definition = lambdas.get(name)
-        if definition is None:
-            return "not registered"
-
-        registered = definition.callable
-        if registered is value:
-            return None
-
-        if (
-            isinstance(registered, MethodType)
-            and isinstance(value, MethodType)
-            and registered.__self__ is value.__self__
-            and registered.__func__ is value.__func__
-        ):
-            return None
-
-        return "different callable"
-
-    def warn_rejected_lambda(self, name, reason):
-        if reason == "different callable":
-            message = (
-                "Callable section '%s' resolves to a different callable than "
-                "the one supplied in the lambdas mapping"
-            )
-        else:
-            message = "Callable section '%s' is not in the supplied lambdas mapping"
-        sys.stderr.write("%s%s" % (message % name, linesep))
+    def warn_rejected_callable_data(self, key):
+        message = "Callable template data '%s' is rejected when lambdas= is supplied"
+        sys.stderr.write("%s%s" % (message % key, linesep))
 
 
 def render(
@@ -291,14 +260,11 @@ def render(
 
     warn -- Issue a warning to stderr when a template substitution isn't found in the data
 
-    lambdas -- Optional mapping defining which section names may invoke callables.
-               A callable must also resolve from template data under the same name.
-               The resolved callable must be the registered callable; separately
-               accessed bound methods also match when their receiver and
-               underlying function are identical.
-               Supplying an empty mapping disables callable sections. When omitted,
-               callable values reached through template context retain legacy
-               two-argument section-lambda behaviour.
+    lambdas -- Optional mapping defining callable section names. In explicit mode,
+               mapped names take precedence over template data. Callable values in
+               template data are rejected; supplying an empty mapping disables
+               callable sections. When omitted, callable values reached through
+               template context retain legacy two-argument section-lambda behaviour.
 
 
     Returns:
@@ -397,12 +363,14 @@ def _render(
 
         # If we're a section tag
         elif tag == "section":
-            # Get the sections scope
-            scope = context.lookup(key, warn=warn)
+            # Explicit lambdas take precedence over template data.
+            scope = context.lambda_for(key)
+            if scope is None:
+                scope = context.lookup(key, warn=warn)
 
             # If the scope is a callable (as described in
             # https://mustache.github.io/mustache.5.html)
-            if isinstance(scope, Callable) and context.permits_lambda(key, scope):
+            if isinstance(scope, Callable):
                 # Generate template text from tags
                 text = unicode("", "utf-8")
                 tags = []
@@ -457,13 +425,6 @@ def _render(
                 else:  # python 2
                     output += rend.decode("utf-8")
 
-            elif isinstance(scope, Callable):
-                if warn:
-                    context.warn_rejected_lambda(
-                        key, context.lambda_rejection_reason(key, scope)
-                    )
-                context.prepend_scope(False)
-
             # If the scope is a sequence, an iterator or generator but not
             # derived from a string
             elif isinstance(scope, (Sequence, Iterator)) and not isinstance(
@@ -512,13 +473,9 @@ def _render(
         # If we're an inverted section
         elif tag == "inverted section":
             # Add the flipped scope to the scopes
-            scope = context.lookup(key, warn=warn)
-            if isinstance(scope, Callable) and not context.permits_lambda(key, scope):
-                if warn:
-                    context.warn_rejected_lambda(
-                        key, context.lambda_rejection_reason(key, scope)
-                    )
-                scope = ""
+            scope = context.lambda_for(key)
+            if scope is None:
+                scope = context.lookup(key, warn=warn)
             context.prepend_scope(not scope)
 
         # If we're a partial

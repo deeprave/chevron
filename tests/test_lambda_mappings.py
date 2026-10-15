@@ -38,7 +38,24 @@ def test_explicit_mapping_does_not_invoke_an_unregistered_callable() -> None:
     assert calls == []
 
 
-def test_explicit_mapping_requires_the_resolved_callable_identity() -> None:
+@pytest.mark.parametrize("template", ["{{action}}", "{{{action}}}"])
+def test_explicit_mode_rejects_callable_template_data_in_interpolation(
+    template: str, capsys
+) -> None:
+    def action(text: str, render: object) -> str:
+        return "called"
+
+    assert chevron.render(template, {"action": action}, lambdas={}, warn=True) == ""
+    assert capsys.readouterr().err == (
+        "Callable template data 'action' is rejected when lambdas= is supplied\n"
+    )
+
+
+def test_explicit_mode_keeps_non_callable_template_data() -> None:
+    assert chevron.render("{{action}}", {"action": "data"}, lambdas={}) == "data"
+
+
+def test_explicit_mapping_shadows_callable_template_data() -> None:
     calls: list[str] = []
 
     def registered(text: str, render: object) -> str:
@@ -55,11 +72,11 @@ def test_explicit_mapping_requires_the_resolved_callable_identity() -> None:
         lambdas={"action": registered},
     )
 
-    assert result == ""
-    assert calls == []
+    assert result == "registered"
+    assert calls == ["registered"]
 
 
-def test_lambda_mapping_is_not_added_to_template_data() -> None:
+def test_explicit_mapping_supplies_a_section_callable() -> None:
     def registered(text: str, render: object) -> str:
         return "registered"
 
@@ -69,7 +86,7 @@ def test_lambda_mapping_is_not_added_to_template_data() -> None:
         lambdas={"action": registered},
     )
 
-    assert result == ""
+    assert result == "registered"
 
 
 def test_explicit_mapping_supports_dotted_names_and_partials() -> None:
@@ -339,7 +356,7 @@ def test_explicit_mode_rejects_unregistered_callable_in_a_partial() -> None:
     assert calls == []
 
 
-def test_explicit_mode_rejects_a_shadowing_callable_in_an_iterable_scope() -> None:
+def test_explicit_mapping_shadows_callable_iterable_data() -> None:
     calls: list[str] = []
 
     def registered(text: str, render: object) -> str:
@@ -356,9 +373,9 @@ def test_explicit_mode_rejects_a_shadowing_callable_in_an_iterable_scope() -> No
             {"action": registered, "items": [{"action": shadowing}]},
             lambdas={"action": registered},
         )
-        == ""
+        == "registered"
     )
-    assert calls == []
+    assert calls == ["registered"]
 
 
 @pytest.mark.parametrize(
@@ -425,7 +442,7 @@ def test_explicit_mode_renders_an_unregistered_callable_as_missing(capsys) -> No
     )
     assert (
         capsys.readouterr().err
-        == "Callable section 'callback' is not in the supplied lambdas mapping\n"
+        == "Callable template data 'callback' is rejected when lambdas= is supplied\n"
     )
     assert (
         chevron.render(
@@ -454,7 +471,7 @@ def test_explicit_mode_accepts_separately_accessed_bound_methods() -> None:
     )
 
 
-def test_explicit_mode_rejects_bound_methods_with_different_receivers() -> None:
+def test_explicit_mapping_uses_a_bound_method_without_template_data() -> None:
     class Handler:
         def action(self, text: str, render: object) -> str:
             return "called"
@@ -462,14 +479,14 @@ def test_explicit_mode_rejects_bound_methods_with_different_receivers() -> None:
     assert (
         chevron.render(
             "{{#action}}body{{/action}}",
-            {"action": Handler().action},
+            {},
             lambdas={"action": Handler().action},
         )
-        == ""
+        == "called"
     )
 
 
-def test_explicit_mode_rejects_different_bound_methods_on_the_same_receiver() -> None:
+def test_explicit_mapping_shadows_a_different_bound_method() -> None:
     calls: list[str] = []
 
     class Handler:
@@ -489,9 +506,9 @@ def test_explicit_mode_rejects_different_bound_methods_on_the_same_receiver() ->
             {"action": handler.rejected},
             lambdas={"action": handler.permitted},
         )
-        == ""
+        == "permitted"
     )
-    assert calls == []
+    assert calls == ["permitted"]
 
 
 @pytest.mark.parametrize(
@@ -609,7 +626,7 @@ def test_registered_callable_is_truthy_in_an_inverted_section() -> None:
     )
 
 
-def test_explicit_mapping_respects_scope_precedence() -> None:
+def test_explicit_mapping_precedes_scope_precedence() -> None:
     def outer(text: str, render: object) -> str:
         return "outer"
 
@@ -622,7 +639,7 @@ def test_explicit_mapping_respects_scope_precedence() -> None:
             scopes=[{"action": inner}, {"action": outer}],
             lambdas={"action": outer},
         )
-        == ""
+        == "outer"
     )
 
 
@@ -647,10 +664,7 @@ def test_lambda_mapping_is_snapshotted_for_a_render() -> None:
     )
 
 
-def test_warning_distinguishes_identity_mismatch(capsys) -> None:
-    def registered(text: str, render: object) -> str:
-        return "registered"
-
+def test_warning_identifies_rejected_callable_template_data(capsys) -> None:
     def resolved(text: str, render: object) -> str:
         return "resolved"
 
@@ -658,14 +672,13 @@ def test_warning_distinguishes_identity_mismatch(capsys) -> None:
         chevron.render(
             "{{#action}}body{{/action}}",
             {"action": resolved},
-            lambdas={"action": registered},
+            lambdas={},
             warn=True,
         )
         == ""
     )
     assert capsys.readouterr().err == (
-        "Callable section 'action' resolves to a different callable than the one "
-        "supplied in the lambdas mapping\n"
+        "Callable template data 'action' is rejected when lambdas= is supplied\n"
     )
 
 
@@ -684,7 +697,7 @@ def test_inverted_section_warning_identifies_an_unregistered_callable(capsys) ->
     )
     assert (
         capsys.readouterr().err
-        == "Callable section 'callback' is not in the supplied lambdas mapping\n"
+        == "Callable template data 'callback' is rejected when lambdas= is supplied\n"
     )
 
 

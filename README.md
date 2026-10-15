@@ -4,7 +4,7 @@ A Python implementation of the [Mustache templating language](https://mustache.g
 
 This is a direct fork of the now-unmaintained [noahmorrison/chevron](https://github.com/noahmorrison/chevron). It builds on that implementation, modernising the project, closing potential security gaps around template extensions, and bringing Mustache compliance up to date.
 
-Future work includes asynchronous rendering and partial support.
+Future work includes asynchronous rendering and asynchronous partial handling.
 
 Why chevron?
 ------------
@@ -127,7 +127,7 @@ args = {
 chevron.render(**args)
 ```
 
-For new code using this implementation, use the `lambdas=` mapping to provide callables for a render. Chevron resolves tag names from template data first and, when a name is absent there, then from lambdas. When a callable is resolved from lambdas, it is invoked and replaced by what that callable returns. If the tag is a section tag, it receives the raw text between `{{#tagname}}` and `{{/tagname}}`.
+For new code using this implementation, use the `lambdas=` mapping to provide callable section tags for a render. Chevron checks that mapping before template data: a configured lambda runs without resolving the same name from template data. When no lambda is configured, ordinary template data resolves the name; callable values found there are rejected in explicit mode. A section lambda receives the raw text between `{{#tagname}}` and `{{/tagname}}`.
 
 ```python
 import chevron
@@ -139,12 +139,12 @@ def select_first(text, render):
 
 chevron.render(
     "{{#select_first}}{{first}} || {{second}}{{/select_first}}",
-    {"select_first": select_first, "first": "one", "second": "two"},
+    {"first": "one", "second": "two"},
     lambdas={"select_first": select_first},
 )
 ```
 
-Pass `lambdas={}` to disallow callables in templates explicitly. In explicit mode, callable values are lookup leaves: a template cannot traverse their attributes. A callable section absent from the supplied mapping behaves as a missing value; with `warn=True`, Chevron writes a diagnostic (currently to standard error).
+Pass `lambdas={}` to configure no callable section tags explicitly. In explicit mode, callable values in template data are rejected and render as empty values; with `warn=True`, Chevron writes a diagnostic (currently to standard error). Callable values are also lookup leaves, so a template cannot traverse their attributes.
 
 This is intentional for all callable values, including callable instances and classes. For example, `{{build.version}}` does not traverse a callable `build` in explicit mode. Expose only the needed plain data through an authorised section lambda instead:
 
@@ -155,7 +155,7 @@ def build(text, render):
 
 chevron.render(
     "{{#build}}{{version}}{{/build}}",
-    {"build": build},
+    {},
     lambdas={"build": build},
 )
 ```

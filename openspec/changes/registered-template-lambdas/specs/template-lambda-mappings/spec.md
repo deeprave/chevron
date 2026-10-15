@@ -2,82 +2,65 @@
 
 ## Purpose
 
-Chevron authorises template lambda execution per render while preserving existing legacy section-lambda behaviour for callers that do not opt into explicit authorisation.
+Chevron supplies executable template lambdas through a per-render mapping while preserving legacy section-lambda behaviour when a caller does not opt into explicit mode.
 
 ## ADDED Requirements
 
-### Requirement: Explicit lambda authorisation
+### Requirement: Explicit lambda mappings take precedence for callable sections
 
-Chevron SHALL accept an optional `lambdas` mapping for a render. When that mapping is supplied, Chevron SHALL execute a section callable only when normal template lookup resolves the exact callable mapped to the complete template name. The mapping SHALL not provide template values or change normal template scope precedence.
+Chevron SHALL accept an optional `lambdas` mapping for a render. When supplied, the mapping SHALL be the sole source of executable template lambdas and SHALL be checked before template data for a callable-capable section name. A configured lambda name SHALL shadow template data with the same name.
 
-#### Scenario: Explicitly authorised callable executes
+#### Scenario: Configured lambda executes without template data
 
-- **WHEN** a template section resolves a callable that is the exact callable mapped to its complete template name
-- **THEN** Chevron executes that callable through the supported legacy section-lambda protocol
+- **WHEN** a template section name is present in an explicit lambda mapping and absent from template data
+- **THEN** Chevron executes the mapped callable through the supported legacy section-lambda protocol
 
-#### Scenario: Unauthorised callable is not invoked
+#### Scenario: Configured lambda shadows template data
 
-- **WHEN** a template section resolves a callable absent from an explicitly supplied lambda mapping
-- **THEN** Chevron does not invoke that callable
+- **WHEN** a template section name is present in an explicit lambda mapping and template data contains the same name
+- **THEN** Chevron executes the mapped callable without resolving that name from template data
 
-#### Scenario: Shadowed callable is not authorised by name alone
-
-- **WHEN** an inner template scope resolves a different callable under a name mapped to an outer callable
-- **THEN** Chevron does not invoke the inner callable
-
-#### Scenario: Explicit empty mapping authorises no callables
+#### Scenario: Explicit empty mapping configures no callables
 
 - **WHEN** a render supplies `lambdas={}`
-- **THEN** Chevron invokes no callable values as template lambdas
+- **THEN** Chevron executes no template callable from the mapping
 
-#### Scenario: Unregistered callable section behaves as missing
+### Requirement: Explicit mode rejects callable template data
 
-- **WHEN** a section resolves a callable absent from an explicitly supplied
-  mapping
-- **THEN** Chevron skips the normal section, renders its inverted section, and
-  writes a diagnostic to standard error when `warn=True`
+When an explicit lambda mapping is supplied, template data SHALL not be an executable callable source. A callable resolved from template data where no configured lambda name takes precedence SHALL render as an empty value and SHALL emit a diagnostic when `warn=True`.
 
-#### Scenario: Explicit mode does not traverse callable internals
+#### Scenario: Callable data in a section is rejected
 
-- **WHEN** a template performs a dotted lookup from a callable while an
-  explicit mapping is supplied
-- **THEN** Chevron treats that lookup as missing rather than traversing the
-  callable object
+- **WHEN** an explicit mapping lacks a section name that resolves to a callable in template data
+- **THEN** Chevron does not invoke the callable and treats the section as falsey
 
-#### Scenario: Explicit mode treats callable data as opaque
+#### Scenario: Callable data in interpolation is rejected
 
-- **WHEN** a dotted lookup would traverse a callable instance or class while
-  an explicit mapping is supplied
-- **THEN** Chevron treats that lookup as missing
+- **WHEN** an explicit mapping is supplied and an interpolation resolves to a callable in template data
+- **THEN** Chevron renders an empty value and emits a diagnostic when `warn=True`
 
-#### Scenario: Identity mismatch explains the rejection
+#### Scenario: Non-callable template data remains available
 
-- **WHEN** a callable section name exists in the supplied mapping but normal
-  lookup resolves a different callable and `warn=True`
-- **THEN** Chevron emits a diagnostic that identifies the resolved callable as
-  different from the callable mapped for that name
+- **WHEN** an explicit mapping lacks a template name that resolves to a non-callable value
+- **THEN** Chevron renders that value according to the tag's ordinary semantics
 
-#### Scenario: Bound method registrations identify the same receiver and function
+#### Scenario: Explicit mode does not traverse callable data
 
-- **WHEN** normal lookup and the supplied mapping resolve separately accessed
-  Python bound methods with identical `__self__` and `__func__`
-- **THEN** Chevron permits the matching section callable
+- **WHEN** a template performs a dotted lookup from a callable in template data while an explicit mapping is supplied
+- **THEN** Chevron treats that lookup as missing rather than traversing the callable object
 
 ### Requirement: Lambda mapping validation
 
-When supplied, `lambdas` SHALL be a mapping of string section names to
-callable values. Chevron SHALL reject invalid mappings with a descriptive
-`TypeError`.
+When supplied, `lambdas` SHALL be a mapping of string template names to callable values. Chevron SHALL reject invalid mappings with a descriptive `TypeError`.
 
 #### Scenario: Invalid lambda mapping is rejected
 
-- **WHEN** a caller supplies a non-mapping, a non-string name, or a
-  non-callable mapped value
+- **WHEN** a caller supplies a non-mapping, a non-string name, or a non-callable mapped value
 - **THEN** Chevron raises `TypeError` before rendering
 
 ### Requirement: Legacy section-lambda compatibility
 
-When a caller omits `lambdas`, Chevron SHALL preserve the existing legacy behaviour for callable section values found through template scopes. Existing two-argument section lambdas SHALL continue to receive the raw section text and a rendering callback, including the callback's temporary-data capability.
+When a caller omits `lambdas` or passes `None`, Chevron SHALL preserve the existing legacy behaviour for callable section values found through template scopes. Existing two-argument section lambdas SHALL continue to receive the raw section text and a rendering callback, including the callback's temporary-data capability.
 
 #### Scenario: Existing callable section remains executable
 
@@ -86,8 +69,7 @@ When a caller omits `lambdas`, Chevron SHALL preserve the existing legacy behavi
 
 #### Scenario: Callable reached after a non-callable object attribute remains executable
 
-- **WHEN** compatibility-mode lookup crosses a non-callable object attribute
-  and then resolves a callable from a mapping or sequence
+- **WHEN** compatibility-mode lookup crosses a non-callable object attribute and then resolves a callable from a mapping or sequence
 - **THEN** Chevron invokes that callable as a legacy section lambda
 
 #### Scenario: Legacy callback can render with temporary data
@@ -97,48 +79,40 @@ When a caller omits `lambdas`, Chevron SHALL preserve the existing legacy behavi
 
 ### Requirement: Lambda context follows recursive rendering
 
-Chevron SHALL apply the active lambda-authorisation behaviour consistently while rendering nested sections, iterable items, partials, and templates rendered through a legacy lambda callback. Complete dotted template names SHALL be evaluated according to the same mapping and list traversal semantics as normal template lookup.
+Chevron SHALL apply the active lambda-mapping or legacy behaviour consistently while rendering nested sections, iterable items, partials, and templates rendered through a legacy lambda callback. Complete dotted configured names SHALL resolve directly from the explicit mapping.
 
-#### Scenario: Explicit authorisation remains active in a partial
+#### Scenario: Configured lambda remains available in a partial
 
-- **WHEN** a partial contains a section that resolves a callable during a render with an explicit lambda mapping
-- **THEN** Chevron applies the same mapping and identity check to that partial section
+- **WHEN** a partial contains a section whose complete name is present in an explicit lambda mapping
+- **THEN** Chevron executes the mapped callable while rendering that partial
 
-#### Scenario: Dotted callable lookup requires the matching mapped callable
+#### Scenario: Dotted configured lambda executes
 
-- **WHEN** a section uses a dotted template name that resolves a callable from a nested mapping
-- **THEN** Chevron invokes it only when the explicit lambda mapping contains that complete dotted name and the exact callable
+- **WHEN** a section uses a dotted template name present in the explicit lambda mapping
+- **THEN** Chevron executes the callable mapped to that complete name
 
 #### Scenario: Legacy callback inherits its lambda behaviour
 
 - **WHEN** a legacy section lambda renders a template through its rendering callback
-- **THEN** the nested render retains the active authorisation or compatibility behaviour
+- **THEN** the nested render retains the active explicit or compatibility behaviour
 
 ### Requirement: Lambda callback token reuse is render-scoped
 
-Chevron SHALL keep any token reuse needed by a section lambda's supplied
-rendering callback within the active top-level render context. This internal
-reuse SHALL not change the public API or rendered output.
+Chevron SHALL keep any token reuse needed by a section lambda's supplied rendering callback within the active top-level render context. This internal reuse SHALL not change the public API or rendered output.
 
 #### Scenario: Section-lambda callback retains rendered output
 
-- **WHEN** a section lambda passes its received section text to the supplied
-  rendering callback
-- **THEN** Chevron produces the same rendered output while keeping any reused
-  parsed tokens scoped to that active render
+- **WHEN** a section lambda passes its received section text to the supplied rendering callback
+- **THEN** Chevron produces the same rendered output while keeping any reused parsed tokens scoped to that active render
 
 ### Requirement: Library partial loading is opt-in
 
-The `render()` library API SHALL default `partials_path` to `None`. A caller
-SHALL supply a partial path explicitly to enable filesystem partial loading.
-This requirement does not alter the CLI `--path` default.
+The `render()` library API SHALL default `partials_path` to `None`. A caller SHALL supply a partial path explicitly to enable filesystem partial loading. This requirement does not alter the CLI `--path` default.
 
 #### Scenario: Missing mapped partial does not load from the working directory
 
-- **WHEN** a library render supplies no `partials_path` and a partial is absent
-  from `partials_dict`
-- **THEN** Chevron renders that partial as empty without reading from the
-  process working directory
+- **WHEN** a library render supplies no `partials_path` and a partial is absent from `partials_dict`
+- **THEN** Chevron renders that partial as empty without reading from the process working directory
 
 #### Scenario: Explicit partial path restores filesystem lookup
 

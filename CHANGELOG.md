@@ -6,13 +6,12 @@ All notable changes to Chevron are documented in this file.
 
 ### Added
 
-- `chevron.render()` accepts an optional `lambdas=` mapping that defines which
-  section tags may invoke callables for a render. The mapping is separate from
-  template data: it neither supplies template values nor changes ordinary
-  scope precedence.
-- Explicit mappings match complete template names and callable identity. Python
-  bound methods also match when both their receiver and underlying function are
-  identical.
+- `chevron.render()` accepts an optional `lambdas=` mapping that supplies
+  callable section tags for a render. In explicit mode, configured lambda names
+  take precedence over template data.
+- Callable values found in template data are rejected in explicit mode rather
+  than invoked or rendered. Omit `lambdas` or pass `None` to retain legacy
+  callable template-data behaviour.
 - Supplying `lambdas={}` explicitly disables all callable section execution.
 - Invalid `lambdas=` arguments now raise descriptive `TypeError` exceptions.
 - `render()` now disables filesystem partial lookup by default
@@ -23,11 +22,11 @@ All notable changes to Chevron are documented in this file.
 
 - Existing callers that omit `lambdas` (or pass `None`) retain legacy
   two-argument section-lambda handling.
-- In explicit mode, all callable values are lookup leaves. This prevents
-  callable-object traversal but means templates should receive plain data;
-  authorised section lambdas can provide a constrained temporary scope.
-- Unregistered callable sections behave as missing and can emit a `warn=True`
-  diagnostic that distinguishes an absent mapping name from an identity mismatch.
+- In explicit mode, callable template-data values are lookup leaves. This
+  prevents callable-object traversal and means templates should receive plain
+  data; configured section lambdas can provide a constrained temporary scope.
+- Rejected callable template data behaves as missing and can emit a `warn=True`
+  diagnostic.
 
 ### Modernised
 

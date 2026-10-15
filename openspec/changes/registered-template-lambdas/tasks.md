@@ -39,3 +39,9 @@
 - [x] 7.2 Make `warn=True` distinguish blocked callable traversal from an absent key without treating registered callables as traversable.
 - [x] 7.3 Move lambda-section token reuse from process-global state to the private render context, preserving existing rendering behaviour and public API.
 - [x] 7.4 Correct the README partials default comment and replace developer-oriented direct Git installation guidance with supported end-user installation guidance.
+
+## 8. Lambda-first Explicit Resolution
+
+- [x] 8.1 Replace explicit-mode identity matching with lambda-first section resolution and template-data callable rejection; verify lambda entries shadow same-named template data and unconfigured data callables render empty with `warn=True`.
+- [x] 8.2 Update pytest-style behaviour coverage for lambda-only sections, lambda precedence, rejected callable interpolation and sections, explicit empty mappings, and unchanged legacy callable execution; verify the focused suite passes.
+- [x] 8.3 Revise README, CHANGELOG, and the lambda-mapping design/specification artefacts for lambda-first resolution and asynchronous partial handling; verify documented examples match the implementation.

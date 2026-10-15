@@ -2,15 +2,15 @@
 
 ## Context
 
-`render()` currently carries a mutable list of template scopes through all recursive rendering paths. Callable section values are invoked solely because they are callable. See [proposal.md](proposal.md) and the `template-lambda-mappings` specification for the required public behaviour.
+`render()` carries a mutable list of template scopes through recursive rendering. Legacy Chevron invokes a callable section value reached through those scopes. Explicit mappings introduce a separate, trusted callable namespace for applications rendering untrusted templates. See `proposal.md` and the `template-lambda-mappings` specification for the required public behaviour.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- Keep template lookup data separate from callable authorisation state.
-- Preserve existing callers that provide legacy section lambdas in `data` or `scopes`.
-- Make explicit lambda mappings authoritative for applications that render untrusted templates.
+- Keep ordinary template data separate from configured executable lambdas.
+- Resolve configured lambda names before template data in explicit mode.
+- Reject callable template-data values in explicit mode while retaining legacy compatibility when no mapping is supplied.
 - Carry the same rendering state through every recursive render path.
 
 **Non-Goals:**
@@ -25,103 +25,44 @@
 
 ### Use a private composite render context
 
-Introduce a private render-context value that owns the mutable scope stack and lambda-definition state. Recursive rendering receives this context rather than independently reconstructing scope and lambda state.
-
-This centralises the distinction between normal value lookup and callable authorisation while retaining the existing `data` and `scopes` inputs. A public context class is not needed for this change.
+Introduce a private render context that owns the mutable scope stack, configured lambda mapping, and render-scoped token cache. Recursive rendering receives this context rather than independently reconstructing scope and lambda state.
 
 **Alternative considered:** Passing `lambdas` separately through every recursive call. This duplicates state propagation and risks omissions in partial or callback rendering.
 
-### Treat an explicit mapping as strict mode
+### Resolve explicit lambdas before template data
 
-`render(..., lambdas=mapping)` enters explicit mode, including when `mapping` is empty. In this mode, a section callable executes only if `mapping[complete_template_name] is resolved_value`.
+`render(..., lambdas=mapping)` enters explicit mode, including when `mapping` is empty. For a callable-capable section, the complete template name is looked up in the mapping first. A mapped value executes without querying template data, so configured lambdas intentionally shadow same-named template values.
 
-`lambdas` omitted or `None` selects compatibility mode. Compatibility mode retains existing legacy section-callable behaviour and must not claim the explicit-mode security guarantee.
+When the mapping lacks a name, ordinary template data supplies non-callable values. A callable obtained from data is rejected, rendered as empty, and produces a warning when requested. This makes the mapping the sole executable-code source in explicit mode and removes identity matching and bound-method special cases.
 
-**Alternative considered:** Inferring strict mode from whether a mapping is empty. This makes `lambdas={}` ambiguous and prevents callers from explicitly authorising no extensions.
+`lambdas` omitted or `None` selects compatibility mode. Compatibility mode retains existing legacy section-callable behaviour and makes no explicit-mode security guarantee.
 
-### Normalise public mapping values privately
+### Preserve ordinary lookup behaviour and callable opacity
 
-The public mapping continues to contain plain callables. Internally, each is normalised into a private definition carrying callable identity and the existing legacy section protocol. Issue #4 can extend that definition with explicit protocol and async metadata without changing the render-context boundary.
-
-**Alternative considered:** Requiring public wrapper objects now. That would add API complexity before the additional protocols exist.
-
-### Decide compatibility eligibility at section lookup
-
-Compatibility mode retains Chevron's existing callable-section behaviour for values resolved through mapping and sequence lookup, including the current scope (`.`). The original scope entries continue to determine ordinary template lookup and precedence; no compatibility map is precomputed.
-
-`_RenderContext.allows_callable_traversal` makes the lookup policy explicit:
-when no mapping is supplied, dotted lookup may traverse callable values and a
-callable section value that normal lookup resolves is eligible. The existing
-lookup rule still skips a callable obtained directly by object attribute
-access; a callable subsequently obtained from a mapping or sequence remains
-compatible with existing renders.
-
-**Alternative considered:** Pre-walking arbitrary object graphs. This risks cycles, side effects, and divergence from Chevron's existing lookup semantics.
-
-### Keep explicit mode strict and diagnosable
-
-When a mapping is supplied, a callable is a leaf for dotted lookup. This keeps
-templates from traversing callable internals while still allowing the callable
-itself to be resolved for section matching. A callable section absent from the
-supplied mapping behaves as missing: a normal section is skipped and an
-inverted section renders. With `warn=True`, Chevron writes a diagnostic to
-standard error saying that the callable section is not in the supplied lambdas
-mapping.
-
-Exact object identity remains the default mapping check. Python bound methods
-are the narrow exception: two `MethodType` values match when both `__self__`
-and `__func__` are identical. This supports normal instance and class method
-use without broad equality-based matching.
-
-This broad leaf rule deliberately includes callable instances and classes, not
-only functions and methods. In explicit mode, callers should expose plain data
-directly or use an authorised section lambda to provide a small temporary data
-scope. Compatibility mode retains historic callable-object traversal.
+In explicit mode, template data remains available for ordinary values. Callable data is rejected rather than rendered, invoked, or traversed; dotted traversal through callable data remains unavailable. Compatibility mode retains historic callable-object traversal and legacy section execution.
 
 ### Disable implicit filesystem partial loading for the library API
 
-The `render()` library API defaults `partials_path` to `None`. A caller that
-needs filesystem partials supplies an explicit trusted directory, including
-`partials_path="."` to restore historic library behaviour. This prevents an
-untrusted template from turning a missing `partials_dict` entry into a read
-relative to the renderer process's working directory.
-
-The command-line interface intentionally retains its `--path` default of
-`"."`; it is an explicit filesystem-oriented interface with an existing
-compatibility contract.
+The `render()` library API defaults `partials_path` to `None`. A caller that needs filesystem partials supplies an explicit trusted directory, including `partials_path="."` to restore historic library behaviour. The command-line interface retains its `--path` default of `"."`.
 
 ### Preserve state across recursive renders
 
-Nested sections, iterable items, partials, and the legacy callback's `render(template, data)` path must use the active composite context. The callback adds its temporary data at the front of the scope stack while retaining the enclosing mode and lambda definitions.
-
-**Alternative considered:** Letting each recursive `render()` create a fresh context. That would bypass strict authorisation in nested templates.
+Nested sections, iterable items, partials, and the legacy callback's `render(template, data)` path use the active composite context. The callback adds temporary data at the front of the scope stack while retaining the enclosing explicit or compatibility mode and configured mapping.
 
 ### Scope lambda-section token reuse to the render context
 
-Section-lambda callback rendering may reuse the token sequence already parsed
-from the callback's reconstructed section text. That cache belongs to the
-private render context and is shared only by recursive renders within the same
-top-level `render()` call. It is not a process-global template cache and does
-not alter the public rendering API or output contract.
-
-**Alternative considered:** Retaining a process-global cache. That keeps
-template-controlled section bodies alive indefinitely and lets independent
-renders share parser state without a public requirement to do so.
+Section-lambda callback rendering may reuse the token sequence already parsed from the callback's reconstructed section text. That cache belongs to the private render context and is shared only by recursive renders within the same top-level `render()` call.
 
 ## Risks / Trade-offs
 
-- [A custom mapping or `ChainMap` can have unusual lookup behaviour] → Use
-  normal lookup at section resolution rather than pre-walking data, and cover
-  compatibility paths in tests.
-- [A shadowed callable could be authorised by name alone] → Compare object identity after normal scope resolution.
-- [A recursive path could lose strict mode] → Route every recursive render call through the composite context and add focused tests for partials and legacy callbacks.
-- [Compatibility extraction could be mistaken for the security boundary] → Document that applications rendering untrusted templates must provide an explicit mapping, including `{}` when no lambdas are allowed.
-- [Implicit partial lookup could disclose process-relative files] → Disable it
-  by default for `render()` and require an explicit trusted partial directory.
+- [A configured lambda shadows template data] → Document this deliberate precedence and cover same-name template values in tests.
+- [Callable data is no longer silently rendered in explicit mode] → Reject it predictably as empty with an optional warning; callers that require legacy execution omit `lambdas`.
+- [A recursive path could lose explicit mode] → Route every recursive render call through the composite context and cover partials and legacy callbacks.
+- [Existing lambda conformance failures obscure regressions] → Keep issue #4 failures visible and compare remaining full-suite output with the current baseline.
+- [Implicit partial lookup could disclose process-relative files] → Disable it by default for `render()` and require an explicit trusted partial directory.
 
 ## Migration Plan
 
-1. Add the optional public `lambdas` argument and internal context without changing calls that omit it.
-2. Add strict explicit-mapping checks and regression coverage for legacy section lambdas.
-3. Document explicit mode for untrusted-template renderers.
-4. Retain compatibility mode until a separately approved major-version policy changes it.
+1. Callers requiring executable template extensions pass them only through `lambdas`.
+2. Callers relying on callable values in template data omit `lambdas` to retain legacy behaviour.
+3. Explicit-mode callers remove callable values from template data or accept their intentional empty rendering.
