@@ -1,6 +1,10 @@
-[![PyPI version](https://badge.fury.io/py/chevron.svg)](https://badge.fury.io/py/chevron)
+[![PyPI version](https://badge.fury.io/py/chevron-ng.svg)](https://badge.fury.io/py/chevron-ng)
 
 A Python implementation of the [Mustache templating language](https://mustache.github.io).
+
+This is a direct fork of the now-unmaintained [noahmorrison/chevron](https://github.com/noahmorrison/chevron). It builds on that implementation, modernising the project, closing potential security gaps around template extensions, and bringing Mustache compliance up to date.
+
+Future work includes asynchronous rendering and asynchronous partial handling.
 
 Why chevron?
 ------------
@@ -12,22 +16,15 @@ I'm glad you asked!
 Chevron runs in less than half the time of [pystache](http://github.com/defunkt/pystache) (Which is not even up to date on the spec).
 And in about 70% the time of [Stache](https://github.com/hyperturtle/Stache) (A 'trimmed' version of mustache, also not spec compliant).
 
-### chevron is consistently formatted ###
-
-[Ruff](https://docs.astral.sh/ruff/) checks and formats the codebase, and
-[ty](https://docs.astral.sh/ty/) checks the library's types.
-
 ### chevron is spec compliant ###
 
-Chevron includes a pinned copy of the [Mustache specification](https://github.com/mustache/spec)
-fixtures, including lambda cases. See the fixture [attribution README](tests/fixtures/mustache-spec/README.md).
+Chevron includes a pinned copy of the [Mustache specification](https://github.com/mustache/spec) fixtures, including lambda cases. See the fixture [attribution README](tests/fixtures/mustache-spec/README.md).
 
 If you find a test that Chevron does not pass, please [report it](https://github.com/deeprave/chevron/issues/new).
 
 ### chevron supports modern Python ###
 
 Chevron requires Python 3.11 or later.
-
 
 
 USAGE
@@ -96,7 +93,7 @@ import chevron
 
 args = {
     "template": "Hello, {{> thing }}!",
-    # defaults to .
+    # filesystem lookup is enabled only when this path is supplied
     "partials_path": "partials/",
     # defaults to mustache
     "partials_ext": "ms",
@@ -130,21 +127,51 @@ args = {
 chevron.render(**args)
 ```
 
-INSTALL
--------
+For new code using this implementation, use the `lambdas=` mapping to provide callable section tags for a render. Chevron checks that mapping before template data: a configured lambda runs without resolving the same name from template data. When no lambda is configured, ordinary template data resolves the name; callable values found there are rejected in explicit mode. A section lambda receives the raw text between `{{#tagname}}` and `{{/tagname}}`.
 
-- with git
-```
-$ git clone https://github.com/deeprave/chevron.git
+```python
+import chevron
+
+
+def select_first(text, render):
+    return render(text).split(" || ", 1)[0]
+
+
+chevron.render(
+    "{{#select_first}}{{first}} || {{second}}{{/select_first}}",
+    {"first": "one", "second": "two"},
+    lambdas={"select_first": select_first},
+)
 ```
 
-Also available on pypi!
+Pass `lambdas={}` to configure no callable section tags explicitly. In explicit mode, callable values in template data are rejected and render as empty values; with `warn=True`, Chevron writes a diagnostic (currently to standard error). Callable values are also lookup leaves, so a template cannot traverse their attributes.
 
-- with pip
-```
-$ pip install chevron
+This is intentional for all callable values, including callable instances and classes. For example, `{{build.version}}` does not traverse a callable `build` in explicit mode. Expose only the needed plain data through an authorised section lambda instead:
+
+```python
+def build(text, render):
+    return render(text, {"version": Build.version})
+
+
+chevron.render(
+    "{{#build}}{{version}}{{/build}}",
+    {},
+    lambdas={"build": build},
+)
 ```
 
+Omitting `lambdas` (or passing `None`) retains Chevron's compatibility mode so existing two-argument section callbacks keep working. In this mode, callable values resolved through normal mapping or sequence lookup may execute, including after a non-callable object attribute. A callable obtained directly from an object attribute is still not invoked.
+
+For untrusted templates, always provide an explicit `lambdas` mapping, even if it is empty. This controls callable section execution only; it is not a general template sandbox. Keep secrets and rich objects out of template data, supply only plain values where possible.
+
+Library renders now disable filesystem partial lookup by default. Use vetted partial source in `partials_dict`, or opt in to a trusted filesystem directory:
+
+```python
+chevron.render(template, data, partials_path="/srv/app/partials")
+```
+
+Use `partials_path="."` only when restoring the historic process-current-
+directory lookup intentionally, but this can potentially leak server data if poorly crafted or untrusted templates are rendered.
 
 
 TODO

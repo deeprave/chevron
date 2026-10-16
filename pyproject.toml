@@ -1,9 +1,12 @@
 [build-system]
-requires = ["uv_build>=0.12.15,<0.13"]
+requires = ["uv_build>=0.12.15,<0.14"]
 build-backend = "uv_build"
 
+[tool.uv.build-backend]
+module-name = "chevron"
+
 [project]
-name = "chevron"
+name = "chevron-ng"
 version = "0.15.0"
 description = "Mustache templating language renderer"
 readme = "README.md"
@@ -31,12 +34,34 @@ Repository = "https://github.com/deeprave/chevron"
 chevron = "chevron:cli_main"
 
 [dependency-groups]
-dev = ["pytest", "ruff", "ty"]
+dev = [
+    "pytest",
+    "pytest-cov>=7.1.0",
+    "ruff",
+    "ty",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = ["--strict-markers", "--strict-config"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--cov=chevron",
+    "--cov-report=term-missing",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["chevron"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "if __name__ == .__main__.:",
+    "def cli_main",
+    "# python 2",
+    "# not tested",
+]
 
 [tool.ruff]
 src = ["src"]

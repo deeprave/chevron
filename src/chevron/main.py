@@ -3,7 +3,7 @@
 import sys
 from importlib import import_module
 
-from .metadata import version
+from . import __version__
 from .renderer import render
 
 
@@ -53,7 +53,7 @@ def cli_main():
 
     parser = argparse.ArgumentParser(description=__doc__)
 
-    parser.add_argument("-v", "--version", action="version", version=version)
+    parser.add_argument("-v", "--version", action="version", version=__version__)
 
     parser.add_argument("template", help="The mustache file", type=is_file_or_pipe)
 

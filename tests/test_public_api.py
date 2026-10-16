@@ -1,16 +1,25 @@
 """Regression tests for Chevron's public import interface."""
 
 import sys
+from importlib.metadata import version
 
 import chevron
+import pytest
 
 
 def test_public_exports_are_available() -> None:
-    assert chevron.__all__ == ["main", "render", "cli_main", "ChevronError"]
+    assert chevron.__all__ == [
+        "main",
+        "render",
+        "cli_main",
+        "ChevronError",
+        "__version__",
+    ]
     assert callable(chevron.main)
     assert callable(chevron.render)
     assert callable(chevron.cli_main)
     assert issubclass(chevron.ChevronError, SyntaxError)
+    assert chevron.__version__ == version("chevron-ng")
 
 
 def test_render_remains_available_from_the_package_root() -> None:
@@ -25,3 +34,13 @@ def test_cli_renders_template_without_data_file(tmp_path, monkeypatch, capsys) -
     chevron.cli_main()
 
     assert capsys.readouterr().out == "Hello, World!"
+
+
+def test_cli_reports_the_installed_distribution_version(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(sys, "argv", ["chevron", "--version"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        chevron.cli_main()
+
+    assert exc_info.value.code == 0
+    assert capsys.readouterr().out == f"{chevron.__version__}\n"

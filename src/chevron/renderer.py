@@ -1,6 +1,8 @@
-from os import linesep, path
+from os import linesep
+from pathlib import Path
 
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
 
 from .tokenizer import tokenize
 
@@ -42,8 +44,10 @@ def _html_escape(string):
     return string
 
 
-def _get_key(key, scopes, warn=False):
-    """Get a key from the current scope"""
+def _get_key(key, scopes, warn=False, allow_callable_traversal=True):
+    """Get a key from the current scope."""
+
+    blocked_callable_traversal = False
 
     # If the key is a dot
     if key == ".":
@@ -55,6 +59,10 @@ def _get_key(key, scopes, warn=False):
         try:
             # For every dot seperated key
             for child in key.split("."):
+                if not allow_callable_traversal and isinstance(scope, Callable):
+                    blocked_callable_traversal = True
+                    raise KeyError("callable values are lookup leaves")
+
                 # Move into the scope
                 try:
                     # Try subscripting (Normal dictionaries)
@@ -89,7 +97,14 @@ def _get_key(key, scopes, warn=False):
     # We couldn't find the key in any of the scopes
 
     if warn:
-        sys.stderr.write("Could not find key '%s'%s" % (key, linesep))
+        if blocked_callable_traversal:
+            message = (
+                "Could not resolve '%s': callable values cannot be traversed "
+                "when lambdas= is supplied"
+            ) % key
+        else:
+            message = "Could not find key '%s'" % key
+        sys.stderr.write("%s%s" % (message, linesep))
 
     return ""
 
@@ -104,29 +119,95 @@ def _get_partial(name, partials_dict, partials_path, partials_ext):
         if partials_path is None or partials_path == "":
             return ""
 
-        # Nope...
         try:
-            # Maybe it's in the file system
             path_ext = "." + partials_ext if partials_ext else ""
-            partial_path = path.join(partials_path, name + path_ext)
-            with open(partial_path, "r", encoding="utf-8") as partial:
+            base_path = Path(partials_path).resolve(strict=True)
+            partial_name = Path(name + path_ext)
+            if partial_name.is_absolute() or ".." in partial_name.parts:
+                return ""
+
+            partial_path = (base_path / partial_name).resolve(strict=True)
+            partial_path.relative_to(base_path)
+            with partial_path.open("r", encoding="utf-8") as partial:
                 return partial.read()
 
-        except OSError:
-            # Alright I give up on you
+        except (OSError, RuntimeError, ValueError):
             return ""
 
 
-#
-# The main rendering function
-#
-g_token_cache = {}
+@dataclass
+class _RenderContext:
+    """The scopes and configured section lambdas for one rendering operation."""
+
+    scopes: list
+    lambdas: dict | None
+    token_cache: dict = field(default_factory=dict)
+
+    @classmethod
+    def from_inputs(cls, data, scopes, lambdas):
+        render_scopes = scopes if scopes is not None else [data]
+        explicit_lambdas = None
+        if lambdas is not None:
+            if not isinstance(lambdas, Mapping):
+                raise TypeError(
+                    "lambdas must be a mapping of section names to callables"
+                )
+
+            explicit_lambdas = dict(lambdas)
+            for name, definition in explicit_lambdas.items():
+                if not isinstance(name, str):
+                    raise TypeError("lambdas mapping keys must be strings")
+                if not isinstance(definition, Callable):
+                    raise TypeError("lambdas mapping values must be callable")
+        return cls(render_scopes, explicit_lambdas)
+
+    @property
+    def allows_callable_traversal(self):
+        """Whether dotted lookup may traverse attributes of callable values."""
+
+        return self.lambdas is None
+
+    def prepend_scope(self, scope):
+        self.scopes.insert(0, scope)
+
+    def pop_scope(self):
+        del self.scopes[0]
+
+    def with_prepended_scope(self, scope):
+        return _RenderContext(
+            [scope] + self.scopes,
+            self.lambdas,
+            self.token_cache,
+        )
+
+    def lookup(self, key, warn=False):
+        value = _get_key(
+            key,
+            self.scopes,
+            warn=warn,
+            allow_callable_traversal=self.allows_callable_traversal,
+        )
+
+        if self.lambdas is not None and isinstance(value, Callable):
+            if warn:
+                self.warn_rejected_callable_data(key)
+            return ""
+        return value
+
+    def lambda_for(self, key):
+        if self.lambdas is None:
+            return None
+        return self.lambdas.get(key)
+
+    def warn_rejected_callable_data(self, key):
+        message = "Callable template data '%s' is rejected when lambdas= is supplied"
+        sys.stderr.write("%s%s" % (message % key, linesep))
 
 
 def render(
     template="",
     data={},
-    partials_path=".",
+    partials_path=None,
     partials_ext="mustache",
     partials_dict={},
     padding="",
@@ -134,6 +215,7 @@ def render(
     def_rdel="}}",
     scopes=None,
     warn=False,
+    lambdas=None,
 ):
     """Render a mustache template.
 
@@ -158,7 +240,8 @@ def render(
 
     partials_path -- The path to where your partials are stored
                      If set to None, then partials won't be loaded from the file system
-                     (defaults to '.')
+                     (defaults to None). Supply '.' to restore the historic
+                     process-current-directory lookup behaviour.
 
     partials_ext  -- The extension that you want the parser to look for
                      (defaults to 'mustache')
@@ -181,11 +264,45 @@ def render(
 
     warn -- Issue a warning to stderr when a template substitution isn't found in the data
 
+    lambdas -- Optional mapping defining callable section names. In explicit mode,
+               mapped names take precedence over template data. Callable values in
+               template data are rejected; supplying an empty mapping disables
+               callable sections. When omitted, callable values reached through
+               template context retain legacy two-argument section-lambda behaviour.
+
 
     Returns:
 
     A string containing the rendered template.
     """
+
+    context = _RenderContext.from_inputs(data, scopes, lambdas)
+    return _render(
+        template,
+        context=context,
+        partials_path=partials_path,
+        partials_ext=partials_ext,
+        partials_dict=partials_dict,
+        padding=padding,
+        def_ldel=def_ldel,
+        def_rdel=def_rdel,
+        warn=warn,
+    )
+
+
+def _render(
+    template,
+    *,
+    context,
+    partials_path,
+    partials_ext,
+    partials_dict,
+    padding,
+    def_ldel,
+    def_rdel,
+    warn,
+):
+    """Render a template with an existing private render context."""
 
     # If the template is a seqeuence but not derived from a string
     if isinstance(template, Sequence) and not isinstance(template, string_type):
@@ -193,16 +310,15 @@ def render(
         # But it does need to be a generator
         tokens = (token for token in template)
     else:
-        if template in g_token_cache:
-            tokens = (token for token in g_token_cache[template])
+        if template in context.token_cache:
+            tokens = (token for token in context.token_cache[template])
         else:
             # Otherwise make a generator
             tokens = tokenize(template, def_ldel, def_rdel)
 
     output = unicode("", "utf-8")
 
-    if scopes is None:
-        scopes = [data]
+    scopes = context.scopes
 
     # Run through the tokens
     for tag, key in tokens:
@@ -212,14 +328,14 @@ def render(
         # If we're an end tag
         if tag == "end":
             # Pop out of the latest scope
-            del scopes[0]
+            context.pop_scope()
 
         # If the current scope is falsy and not the only scope
         elif not current_scope and len(scopes) != 1:
             if tag in ["section", "inverted section"]:
                 # Set the most recent scope to a falsy value
                 # (I heard False is a good one)
-                scopes.insert(0, False)
+                context.prepend_scope(False)
 
         # If we're a literal tag
         elif tag == "literal":
@@ -231,7 +347,7 @@ def render(
         # If we're a variable tag
         elif tag == "variable":
             # Add the html escaped key to the output
-            thing = _get_key(key, scopes, warn=warn)
+            thing = context.lookup(key, warn=warn)
             if thing is True and key == ".":
                 # if we've coerced into a boolean by accident
                 # (inverted tags do this)
@@ -244,15 +360,17 @@ def render(
         # If we're a no html escape tag
         elif tag == "no escape":
             # Just lookup the key and add it
-            thing = _get_key(key, scopes, warn=warn)
+            thing = context.lookup(key, warn=warn)
             if not isinstance(thing, unicode_type):
                 thing = unicode(str(thing), "utf-8")
             output += thing
 
         # If we're a section tag
         elif tag == "section":
-            # Get the sections scope
-            scope = _get_key(key, scopes, warn=warn)
+            # Explicit lambdas take precedence over template data.
+            scope = context.lambda_for(key)
+            if scope is None:
+                scope = context.lookup(key, warn=warn)
 
             # If the scope is a callable (as described in
             # https://mustache.github.io/mustache.5.html)
@@ -287,20 +405,21 @@ def render(
                             def_rdel,
                         )
 
-                g_token_cache[text] = tags
+                context.token_cache[text] = tags
 
                 rend = scope(
                     text,
-                    lambda template, data=None: render(
+                    lambda template, data=None: _render(
                         template,
-                        data={},
+                        context=(
+                            context.with_prepended_scope(data) if data else context
+                        ),
                         partials_path=partials_path,
                         partials_ext=partials_ext,
                         partials_dict=partials_dict,
                         padding=padding,
                         def_ldel=def_ldel,
                         def_rdel=def_rdel,
-                        scopes=data and [data] + scopes or scopes,
                         warn=warn,
                     ),
                 )
@@ -334,10 +453,9 @@ def render(
                 # For every item in the scope
                 for thing in scope:
                     # Append it as the most recent scope and render
-                    new_scope = [thing] + scopes
-                    rend = render(
+                    rend = _render(
                         template=tags,
-                        scopes=new_scope,
+                        context=context.with_prepended_scope(thing),
                         padding=padding,
                         partials_path=partials_path,
                         partials_ext=partials_ext,
@@ -354,13 +472,15 @@ def render(
 
             else:
                 # Otherwise we're just a scope section
-                scopes.insert(0, scope)
+                context.prepend_scope(scope)
 
         # If we're an inverted section
         elif tag == "inverted section":
             # Add the flipped scope to the scopes
-            scope = _get_key(key, scopes, warn=warn)
-            scopes.insert(0, not scope)
+            scope = context.lambda_for(key)
+            if scope is None:
+                scope = context.lookup(key, warn=warn)
+            context.prepend_scope(not scope)
 
         # If we're a partial
         elif tag == "partial":
@@ -374,15 +494,15 @@ def render(
                 part_padding += left
 
             # Render the partial
-            part_out = render(
+            part_out = _render(
                 template=partial,
+                context=context,
                 partials_path=partials_path,
                 partials_ext=partials_ext,
                 partials_dict=partials_dict,
                 def_ldel=def_ldel,
                 def_rdel=def_rdel,
                 padding=part_padding,
-                scopes=scopes,
                 warn=warn,
             )
 
