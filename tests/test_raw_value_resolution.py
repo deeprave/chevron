@@ -21,14 +21,36 @@ class PreservedFalsey:
         return "preserved"
 
 
-def test_falsey_legacy_callable_section_executes() -> None:
-    assert (
-        chevron.render(
-            "{{#callback}}body{{/callback}}",
-            {"callback": FalseyCallable()},
-        )
-        == "called"
-    )
+class EqualityError:
+    def __eq__(self, other: object) -> bool:
+        raise ValueError("equality failed")
+
+
+class TruthinessError:
+    def __eq__(self, other: object) -> bool:
+        return False
+
+    def __bool__(self) -> bool:
+        raise ValueError("truthiness failed")
+
+
+class FailingString:
+    def __str__(self) -> str:
+        raise RuntimeError("render failed")
+
+
+@pytest.mark.parametrize(
+    ("template", "data"),
+    [
+        ("{{#callback}}body{{/callback}}", {"callback": FalseyCallable()}),
+        (
+            "{{#items}}{{#.}}body{{/.}}{{/items}}",
+            {"items": [FalseyCallable()]},
+        ),
+    ],
+)
+def test_falsey_legacy_callable_section_executes(template: str, data: dict) -> None:
+    assert chevron.render(template, data) == "called"
 
 
 def test_falsey_template_callable_is_rejected_in_explicit_mode(capsys) -> None:
@@ -98,4 +120,42 @@ def test_missing_and_empty_sections_use_ordinary_falsey_behaviour() -> None:
             {"outer": {"empty": []}},
         )
         == "invertedmissing"
+    )
+
+
+@pytest.mark.parametrize("value", [EqualityError(), TruthinessError()])
+def test_coercion_errors_fall_back_to_later_scope(value: object) -> None:
+    assert (
+        chevron.render(
+            "{{value}}",
+            scopes=[{"value": value}, {"value": "fallback"}],
+        )
+        == "fallback"
+    )
+
+
+@pytest.mark.parametrize("explicit_lambdas", [False, True])
+def test_recovered_nested_render_failure_does_not_leak_temporary_scope(
+    explicit_lambdas: bool,
+) -> None:
+    def callback(text: str, render: object) -> str:
+        try:
+            render("{{#temporary}}{{bad}}{{/temporary}}")
+        except RuntimeError:
+            return render("{{name}}")
+        raise AssertionError("nested render should fail")
+
+    options = {"lambdas": {"callback": callback}} if explicit_lambdas else {}
+
+    assert (
+        chevron.render(
+            "{{#callback}}body{{/callback}}",
+            {
+                "callback": callback,
+                "name": "fresh",
+                "temporary": {"name": "stale", "bad": FailingString()},
+            },
+            **options,
+        )
+        == "fresh"
     )

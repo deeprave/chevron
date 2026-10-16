@@ -68,7 +68,13 @@ def _html_escape(string):
     return string
 
 
-def _get_key(key, scopes, warn=False, allow_callable_traversal=True):
+def _get_key(
+    key,
+    scopes,
+    warn=False,
+    allow_callable_traversal=True,
+    value_handler=None,
+):
     """Get a key from the current scope."""
 
     blocked_callable_traversal = False
@@ -76,7 +82,8 @@ def _get_key(key, scopes, warn=False, allow_callable_traversal=True):
     # If the key is a dot
     if key == ".":
         # Then just return the current scope
-        return scopes[0]
+        scope = scopes[0]
+        return value_handler(scope) if value_handler is not None else scope
 
     # Loop through the scopes
     for scope in scopes:
@@ -101,7 +108,7 @@ def _get_key(key, scopes, warn=False, allow_callable_traversal=True):
                         # Try as a list
                         scope = scope[int(child)]
 
-            return scope
+            return value_handler(scope) if value_handler is not None else scope
         except (AttributeError, KeyError, IndexError, ValueError):
             # We couldn't find the key in the current scope
             # We'll try again on the next pass
@@ -119,7 +126,7 @@ def _get_key(key, scopes, warn=False, allow_callable_traversal=True):
             message = "Could not find key '%s'" % key
         sys.stderr.write("%s%s" % (message, linesep))
 
-    return _MISSING
+    return value_handler(_MISSING) if value_handler is not None else _MISSING
 
 
 def _get_partial(name, partials_dict, partials_path, partials_ext):
@@ -193,19 +200,23 @@ class _RenderContext:
             self.token_cache,
         )
 
-    def lookup(self, key, warn=False):
-        value = _get_key(
+    def lookup(self, key, warn=False, value_handler=None):
+        def handle_value(value):
+            if self.lambdas is not None and isinstance(value, Callable):
+                if warn:
+                    self.warn_rejected_callable_data(key)
+                return ""
+            if value_handler is not None:
+                return value_handler(value)
+            return value
+
+        return _get_key(
             key,
             self.scopes,
             warn=warn,
             allow_callable_traversal=self.allows_callable_traversal,
+            value_handler=handle_value,
         )
-
-        if self.lambdas is not None and isinstance(value, Callable):
-            if warn:
-                self.warn_rejected_callable_data(key)
-            return ""
-        return value
 
     def lambda_for(self, key):
         if self.lambdas is None:
@@ -315,6 +326,38 @@ def _render(
     def_rdel,
     warn,
 ):
+    """Render a template while restoring the incoming scope stack."""
+
+    scopes = context.scopes
+    original_scopes = list(scopes)
+    try:
+        return _render_inner(
+            template,
+            context=context,
+            partials_path=partials_path,
+            partials_ext=partials_ext,
+            partials_dict=partials_dict,
+            padding=padding,
+            def_ldel=def_ldel,
+            def_rdel=def_rdel,
+            warn=warn,
+        )
+    finally:
+        scopes[:] = original_scopes
+
+
+def _render_inner(
+    template,
+    *,
+    context,
+    partials_path,
+    partials_ext,
+    partials_dict,
+    padding,
+    def_ldel,
+    def_rdel,
+    warn,
+):
     """Render a template with an existing private render context."""
 
     # If the template is a seqeuence but not derived from a string
@@ -344,7 +387,11 @@ def _render(
             context.pop_scope()
 
         # If the current scope is falsy and not the only scope
-        elif not current_scope and len(scopes) != 1:
+        elif (
+            not current_scope
+            and not isinstance(current_scope, Callable)
+            and len(scopes) != 1
+        ):
             if tag in ["section", "inverted section"]:
                 # Set the most recent scope to a falsy value
                 # (I heard False is a good one)
@@ -360,7 +407,11 @@ def _render(
         # If we're a variable tag
         elif tag == "variable":
             # Add the html escaped key to the output
-            thing = _normalise_value(key, context.lookup(key, warn=warn))
+            thing = context.lookup(
+                key,
+                warn=warn,
+                value_handler=lambda value: _normalise_value(key, value),
+            )
             if thing is True and key == ".":
                 # if we've coerced into a boolean by accident
                 # (inverted tags do this)
@@ -373,7 +424,11 @@ def _render(
         # If we're a no html escape tag
         elif tag == "no escape":
             # Just lookup the key and add it
-            thing = _normalise_value(key, context.lookup(key, warn=warn))
+            thing = context.lookup(
+                key,
+                warn=warn,
+                value_handler=lambda value: _normalise_value(key, value),
+            )
             if not isinstance(thing, unicode_type):
                 thing = unicode(str(thing), "utf-8")
             output += thing
@@ -383,10 +438,15 @@ def _render(
             # Explicit lambdas take precedence over template data.
             scope = context.lambda_for(key)
             if scope is None:
-                scope = context.lookup(key, warn=warn)
-
-            if not isinstance(scope, Callable):
-                scope = _normalise_value(key, scope)
+                scope = context.lookup(
+                    key,
+                    warn=warn,
+                    value_handler=lambda value: (
+                        value
+                        if isinstance(value, Callable)
+                        else _normalise_value(key, value)
+                    ),
+                )
 
             # If the scope is a callable (as described in
             # https://mustache.github.io/mustache.5.html)
@@ -495,8 +555,12 @@ def _render(
             # Add the flipped scope to the scopes
             scope = context.lambda_for(key)
             if scope is None:
-                scope = context.lookup(key, warn=warn)
-            context.prepend_scope(not _normalise_value(key, scope))
+                scope = context.lookup(
+                    key,
+                    warn=warn,
+                    value_handler=lambda value: _normalise_value(key, value),
+                )
+            context.prepend_scope(not scope)
 
         # If we're a partial
         elif tag == "partial":
