@@ -28,6 +28,30 @@ else:  # python 2
 #
 
 
+_MISSING = object()
+
+
+def _normalise_value(key, value):
+    """Apply Chevron's historic falsey-value rendering behaviour."""
+
+    if value is _MISSING:
+        return ""
+
+    if key == ".":
+        return value
+
+    if value in (0, False):
+        return value
+
+    try:
+        if value._CHEVRON_return_scope_when_falsy:
+            return value
+    except AttributeError:
+        return value or ""
+
+    return value or ""
+
+
 def _html_escape(string):
     """HTML escape all of these " & < >"""
 
@@ -77,18 +101,7 @@ def _get_key(key, scopes, warn=False, allow_callable_traversal=True):
                         # Try as a list
                         scope = scope[int(child)]
 
-            # Return an empty string if falsy, with two exceptions
-            # 0 should return 0, and False should return False
-            if scope in (0, False):
-                return scope
-
-            try:
-                # This allows for custom falsy data types
-                # https://github.com/noahmorrison/chevron/issues/35
-                if scope._CHEVRON_return_scope_when_falsy:
-                    return scope
-            except AttributeError:
-                return scope or ""
+            return scope
         except (AttributeError, KeyError, IndexError, ValueError):
             # We couldn't find the key in the current scope
             # We'll try again on the next pass
@@ -106,7 +119,7 @@ def _get_key(key, scopes, warn=False, allow_callable_traversal=True):
             message = "Could not find key '%s'" % key
         sys.stderr.write("%s%s" % (message, linesep))
 
-    return ""
+    return _MISSING
 
 
 def _get_partial(name, partials_dict, partials_path, partials_ext):
@@ -347,7 +360,7 @@ def _render(
         # If we're a variable tag
         elif tag == "variable":
             # Add the html escaped key to the output
-            thing = context.lookup(key, warn=warn)
+            thing = _normalise_value(key, context.lookup(key, warn=warn))
             if thing is True and key == ".":
                 # if we've coerced into a boolean by accident
                 # (inverted tags do this)
@@ -360,7 +373,7 @@ def _render(
         # If we're a no html escape tag
         elif tag == "no escape":
             # Just lookup the key and add it
-            thing = context.lookup(key, warn=warn)
+            thing = _normalise_value(key, context.lookup(key, warn=warn))
             if not isinstance(thing, unicode_type):
                 thing = unicode(str(thing), "utf-8")
             output += thing
@@ -371,6 +384,9 @@ def _render(
             scope = context.lambda_for(key)
             if scope is None:
                 scope = context.lookup(key, warn=warn)
+
+            if not isinstance(scope, Callable):
+                scope = _normalise_value(key, scope)
 
             # If the scope is a callable (as described in
             # https://mustache.github.io/mustache.5.html)
@@ -480,7 +496,7 @@ def _render(
             scope = context.lambda_for(key)
             if scope is None:
                 scope = context.lookup(key, warn=warn)
-            context.prepend_scope(not scope)
+            context.prepend_scope(not _normalise_value(key, scope))
 
         # If we're a partial
         elif tag == "partial":
