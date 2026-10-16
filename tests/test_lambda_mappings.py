@@ -723,3 +723,43 @@ def test_library_default_does_not_load_filesystem_partials(
 
     assert chevron.render("{{> secret}}") == ""
     assert chevron.render("{{> secret}}", partials_path=".") == "secret"
+
+
+def test_filesystem_partials_reject_parent_directory_traversal(tmp_path) -> None:
+    partials_path = tmp_path / "partials"
+    partials_path.mkdir()
+    (tmp_path / "secret.mustache").write_text("secret", encoding="utf-8")
+
+    assert chevron.render("{{> ../secret}}", partials_path=partials_path) == ""
+
+
+def test_filesystem_partials_reject_absolute_names(tmp_path) -> None:
+    partials_path = tmp_path / "partials"
+    partials_path.mkdir()
+    secret_name = tmp_path / "secret"
+    secret_name.with_suffix(".mustache").write_text("secret", encoding="utf-8")
+
+    assert (
+        chevron.render(f"{{{{> {secret_name} }}}}", partials_path=partials_path) == ""
+    )
+
+
+def test_filesystem_partials_reject_escaping_nested_symlinks(tmp_path) -> None:
+    partials_path = tmp_path / "partials"
+    partials_path.mkdir()
+    outside_path = tmp_path / "outside"
+    outside_path.mkdir()
+    (outside_path / "secret.mustache").write_text("secret", encoding="utf-8")
+    (partials_path / "linked").symlink_to(outside_path, target_is_directory=True)
+
+    assert chevron.render("{{> linked/secret}}", partials_path=partials_path) == ""
+
+
+def test_filesystem_partials_allow_a_symlinked_root(tmp_path) -> None:
+    partials_path = tmp_path / "partials"
+    partials_path.mkdir()
+    (partials_path / "included.mustache").write_text("included", encoding="utf-8")
+    symlinked_root = tmp_path / "partial-root"
+    symlinked_root.symlink_to(partials_path, target_is_directory=True)
+
+    assert chevron.render("{{> included}}", partials_path=symlinked_root) == "included"

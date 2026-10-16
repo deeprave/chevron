@@ -45,3 +45,7 @@
 - [x] 8.1 Replace explicit-mode identity matching with lambda-first section resolution and template-data callable rejection; verify lambda entries shadow same-named template data and unconfigured data callables render empty with `warn=True`.
 - [x] 8.2 Update pytest-style behaviour coverage for lambda-only sections, lambda precedence, rejected callable interpolation and sections, explicit empty mappings, and unchanged legacy callable execution; verify the focused suite passes.
 - [x] 8.3 Revise README, CHANGELOG, and the lambda-mapping design/specification artefacts for lambda-first resolution and asynchronous partial handling; verify documented examples match the implementation.
+
+## 9. Filesystem Partial Containment
+
+- [x] 9.1 Restrict filesystem partial fallback to non-traversing relative names whose resolved files remain beneath the configured partial root; preserve a symlinked root while rejecting escaping nested symlinks, and cover each case with pytest.

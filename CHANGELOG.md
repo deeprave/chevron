@@ -20,6 +20,9 @@ All notable changes to Chevron are documented in this file.
 
 ### Changed
 
+- Filesystem partial lookup now rejects absolute partial names, lexical parent
+  traversal, and symlinks that escape the configured partial directory. A
+  symlinked partial directory remains a supported root.
 - Existing callers that omit `lambdas` (or pass `None`) retain legacy
   two-argument section-lambda handling.
 - In explicit mode, callable template-data values are lookup leaves. This

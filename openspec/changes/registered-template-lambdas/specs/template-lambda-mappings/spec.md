@@ -107,7 +107,7 @@ Chevron SHALL keep any token reuse needed by a section lambda's supplied renderi
 
 ### Requirement: Library partial loading is opt-in
 
-The `render()` library API SHALL default `partials_path` to `None`. A caller SHALL supply a partial path explicitly to enable filesystem partial loading. This requirement does not alter the CLI `--path` default.
+The `render()` library API SHALL default `partials_path` to `None`. A caller SHALL supply `partials_path` explicitly to enable filesystem partial loading. This requirement does not alter the CLI `--path` default.
 
 #### Scenario: Missing mapped partial does not load from the working directory
 
@@ -118,3 +118,22 @@ The `render()` library API SHALL default `partials_path` to `None`. A caller SHA
 
 - **WHEN** a library render supplies an explicit `partials_path`
 - **THEN** Chevron resolves an otherwise missing partial from that path
+
+### Requirement: Filesystem partial fallback remains within its configured root
+
+Chevron SHALL consult `partials_dict` before filesystem lookup. When a partial has no `partials_dict` match and filesystem partial loading is enabled, Chevron SHALL read only relative partial names without parent-directory traversal whose resolved targets remain at or below `partials_path`. Chevron MAY follow a symlink used for `partials_path` itself, but SHALL reject an absolute partial name or a nested symlink that escapes that root.
+
+#### Scenario: Mapped partial bypasses filesystem fallback
+
+- **WHEN** `partials_dict` contains a named partial and `partials_path` is also supplied
+- **THEN** Chevron renders the mapped partial without reading the filesystem
+
+#### Scenario: Partial traversal is rejected
+
+- **WHEN** a template names an absolute partial, a parent-directory traversal, or a nested symlink whose resolved target is outside the configured partial root
+- **THEN** Chevron treats that partial as missing and renders it as empty
+
+#### Scenario: Symlinked partial root remains available
+
+- **WHEN** the configured partial root is itself a symlink and a relative partial resolves beneath that root's target
+- **THEN** Chevron loads and renders the partial

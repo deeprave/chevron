@@ -1,4 +1,5 @@
-from os import linesep, path
+from os import linesep
+from pathlib import Path
 
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -118,16 +119,19 @@ def _get_partial(name, partials_dict, partials_path, partials_ext):
         if partials_path is None or partials_path == "":
             return ""
 
-        # Nope...
         try:
-            # Maybe it's in the file system
             path_ext = "." + partials_ext if partials_ext else ""
-            partial_path = path.join(partials_path, name + path_ext)
-            with open(partial_path, "r", encoding="utf-8") as partial:
+            base_path = Path(partials_path).resolve(strict=True)
+            partial_name = Path(name + path_ext)
+            if partial_name.is_absolute() or ".." in partial_name.parts:
+                return ""
+
+            partial_path = (base_path / partial_name).resolve(strict=True)
+            partial_path.relative_to(base_path)
+            with partial_path.open("r", encoding="utf-8") as partial:
                 return partial.read()
 
-        except OSError:
-            # Alright I give up on you
+        except (OSError, RuntimeError, ValueError):
             return ""
 
 
