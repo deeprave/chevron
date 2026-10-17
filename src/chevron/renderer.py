@@ -44,6 +44,14 @@ class _LambdaDefinition:
 
     def __post_init__(self):
         update_wrapper(self, self.callback)
+        callback_type = type(self.callback)
+        self.__module__ = getattr(self.callback, "__module__", callback_type.__module__)
+        self.__name__ = getattr(self.callback, "__name__", callback_type.__name__)
+        self.__qualname__ = getattr(
+            self.callback, "__qualname__", callback_type.__qualname__
+        )
+        self.__doc__ = getattr(self.callback, "__doc__", callback_type.__doc__)
+        self.__annotations__ = getattr(self.callback, "__annotations__", {})
 
     def __call__(self, *args, **kwargs):
         return self.callback(*args, **kwargs)
@@ -751,7 +759,7 @@ def _render_inner(
                 section_end_rdel = section_start_rdel
                 for section_token in tokens:
                     tag_type, tag_key = section_token[:2]
-                    if tag_type == "section" and tag_key == key:
+                    if tag_type in ("section", "inverted section") and tag_key == key:
                         tags_with_same_key += 1
                     if tag_type == "end" and tag_key == key:
                         tags_with_same_key -= 1

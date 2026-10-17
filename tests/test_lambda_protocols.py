@@ -40,6 +40,55 @@ def test_decorated_lambda_preserves_function_metadata_and_binding() -> None:
     assert chevron.render("{{greeting}}", {"greeting": Greetings().greeting}) == "hello"
 
 
+def test_decorated_callable_instance_has_fallback_metadata() -> None:
+    class Greeting:
+        """Return a greeting when called."""
+
+        def __call__(self) -> str:
+            return "hello"
+
+    callback = Greeting()
+    wrapped = chevron.func(callback)
+
+    assert wrapped.__name__ == "Greeting"
+    assert (
+        wrapped.__qualname__
+        == "test_decorated_callable_instance_has_fallback_metadata.<locals>.Greeting"
+    )
+    assert wrapped.__module__ == __name__
+    assert wrapped.__doc__ == "Return a greeting when called."
+    assert wrapped.__annotations__ == {}
+    assert wrapped.__wrapped__ is callback
+    assert chevron.render("{{greeting}}", lambdas={"greeting": wrapped}) == "hello"
+
+
+def test_iterable_section_collects_nested_inverted_sections_with_the_same_name() -> (
+    None
+):
+    template = "{{#items}}{{^items}}empty{{/items}}{{name}};{{/items}}"
+
+    assert (
+        chevron.render(
+            template,
+            {"items": [{"name": "first"}, {"name": "second"}]},
+        )
+        == "first;second;"
+    )
+
+
+def test_tokenize_restores_private_state_stack_when_read_fails() -> None:
+    class BrokenTemplate:
+        def read(self) -> str:
+            raise OSError("unable to read template")
+
+    state_stack = []
+
+    with pytest.raises(OSError, match="unable to read template"):
+        list(tokenize(BrokenTemplate(), _state_stack=state_stack))
+
+    assert state_stack == []
+
+
 def test_declared_function_renders_escaped_and_unescaped_interpolation() -> None:
     @chevron.func
     def markup() -> str:

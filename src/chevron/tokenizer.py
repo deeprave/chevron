@@ -180,13 +180,14 @@ def tokenize(
     """
 
     state = _state if _state is not None else _TokenizationState()
-    if _state_stack is not None:
-        _state_stack.append(state)
     # If the template is a file-like object then read it
     try:
         template = template.read()
     except AttributeError:
         pass
+
+    if _state_stack is not None:
+        _state_stack.append(state)
 
     is_standalone = True
     open_sections = []
