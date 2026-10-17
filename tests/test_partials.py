@@ -14,9 +14,9 @@ def test_missing_values_in_configured_partials_render_empty() -> None:
     assert (
         chevron.render(
             "before, {{>partial}}, after",
-            partials_dict={"partial": "{{#missing}}bloop{{/missing}}"},
+            partials_dict={"partial": "partial: {{#missing}}bloop{{/missing}}"},
         )
-        == "before, , after"
+        == "before, partial: , after"
     )
 
 
@@ -46,7 +46,7 @@ def test_missing_interpolation_values_in_partials_render_empty() -> None:
         chevron.render(
             "{{first}} {{>partial}} {{third}}",
             {"first": "1st", "third": "3rd"},
-            partials_dict={"partial": "{{missing}}"},
+            partials_dict={"partial": "partial: {{missing}}"},
         )
-        == "1st  3rd"
+        == "1st partial:  3rd"
     )

@@ -47,7 +47,7 @@ jobs:
           RELEASE_SHA: ${{ steps.commit.outputs.sha }}
         run: |
           set -euo pipefail
-          RUN_ID="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${RELEASE_SHA}&status=completed&per_page=100" --jq '[.workflow_runs[] | select(.event == "push" and .conclusion == "success")] | first.id // empty')"
+          RUN_ID="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${RELEASE_SHA}&status=completed&per_page=100" --jq '[.workflow_runs[] | select(.event == "push" and .conclusion == "success")] | first | .id // empty')"
           if [ -z "$RUN_ID" ]; then
             echo "No successful push-triggered CI run exists for ${RELEASE_SHA}."
             exit 1
@@ -121,7 +121,7 @@ jobs:
           VERSION: ${{ needs.verify-ci.outputs.version }}
         run: |
           set -euo pipefail
-          awk -v version="$VERSION" '$0 == "## [" version "]" { found=1; next } found && /^## \[/ { exit } found { print }' CHANGELOG.md > release-notes.md
+          awk -v version="$VERSION" 'BEGIN { heading = "## [" version "]" } ($0 == heading || index($0, heading " - ") == 1) { found=1; next } found && /^## \[/ { exit } found { print }' CHANGELOG.md > release-notes.md
 
       - name: Create GitHub release and tag
         env:

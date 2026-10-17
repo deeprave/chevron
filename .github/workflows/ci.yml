@@ -60,10 +60,26 @@ jobs:
       - name: Install development dependencies
         run: uv sync --frozen --dev --python 3.11
 
-      - name: Run pre-commit checks
-        run: uvx pre-commit run --all-files
-        env:
-          SKIP: no-commit-to-branch
+      - name: Check lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Check types
+        run: uv run ty check src/
+
+      - name: Check vulnerabilities
+        run: uvx --from osvcheck==1.2.0 osvcheck
+
+      - name: Validate project metadata
+        run: uvx --from validate-pyproject==0.25 validate-pyproject pyproject.toml
+
+      - name: Check security findings
+        run: uvx --from bandit==1.9.4 bandit -ll -r src/
+
+      - name: Check dead code
+        run: uvx --from vulture==2.15 vulture src/
 
       - name: Build package
         run: uv build
