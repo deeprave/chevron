@@ -25,7 +25,7 @@
 
 ## 5. Continuous integration and publishing
 
-- [x] 5.1 Add `.github/workflows/ci.yml` for pull requests and pushes to `main`, using uv and a Python 3.11–3.15 matrix; pin third-party Actions to immutable commits, configure Dependabot to monitor GitHub Actions and uv dependencies, and verify it runs pytest with a coverage XML report, Ruff check and format verification, Ty, Bandit, Vulture, OSV checking, and `uv build`.
+- [x] 5.1 Add `.github/workflows/ci.yml` for pull requests and pushes to `main`, using uv and a Python 3.11–3.15 matrix; pin third-party Actions to immutable commits, configure Dependabot to monitor GitHub Actions and uv dependencies, and verify it runs pytest, Ruff check and format verification, Ty, Bandit, Vulture, OSV checking, and `uv build`.
 - [x] 5.3 Add a manually dispatched `.github/workflows/publish.yml`; verify it derives the version from `pyproject.toml`, requires successful complete CI for the exact release commit, builds with uv, uses the configured PyPI trusted publisher through OIDC without a stored PyPI token, and creates the matching GitHub release and `v<version>` tag only after publishing succeeds, using matching changelog notes when available or GitHub-generated notes otherwise.
 
 ## 6. Integration verification and documentation

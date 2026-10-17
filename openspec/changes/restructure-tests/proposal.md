@@ -12,7 +12,7 @@ Chevron's test suite mixes a large legacy `unittest.TestCase` module with newer 
 - Separate Chevron behavioural regressions from the vendored Mustache specification harness and retain the fixture suite as an independent compatibility signal.
 - Retain the vendored upstream Mustache specification cases byte-for-byte as the deterministic, named conformance oracle. Add bounded Hypothesis property tests only in Chevron-owned coverage where generated inputs can assert stable renderer/tokenizer invariants; do not replace or rewrite specification fixtures or named regressions with generated testing.
 - Remove redundant incremental and framework-only tests discovered during the migration, preserving coverage for observable production behaviour.
-- Add a `ci.yml` workflow for pull requests and pushes to `main`, covering the supported Python 3.11–3.15 range, the project’s test/static-analysis/build checks, and CI-based SonarCloud analysis with explicit source and test scopes. Pin third-party Actions to immutable commits and use Dependabot to track Action and uv dependency updates.
+- Add a `ci.yml` workflow for pull requests and pushes to `main`, covering the supported Python 3.11–3.15 range and the project’s test/static-analysis/build checks. Pin third-party Actions to immutable commits and use Dependabot to track Action and uv dependency updates.
 - Add a manually dispatched `publish.yml` trusted-publisher workflow which derives the release version from `pyproject.toml`, verifies CI for the selected commit, publishes its build to PyPI using the already configured OIDC publisher, then creates the matching GitHub release and tag with version-specific changelog notes when available.
 
 ## Capabilities

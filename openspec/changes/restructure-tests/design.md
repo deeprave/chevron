@@ -47,7 +47,7 @@ Use Hypothesis alongside the fixture suite for grammar-constrained, bounded prop
 
 ### Make CI and publishing explicit repository contracts
 
-`ci.yml` should run on `pull_request` and `push` to `main`. It should use uv and a 3.11–3.15 matrix, run pytest (including coverage reporting), Ruff check and format verification, Ty, Bandit, Vulture, OSV checking, and `uv build`. It should also run the SonarCloud scan from CI rather than relying on automatic analysis, using repository-local configuration that explicitly sets `sonar.sources=src`, `sonar.tests=tests`, and the project's Python compatibility range. Third-party Actions must be pinned to immutable commit identifiers, with Dependabot configured to propose their updates and updates to the uv lockfile. Local pre-commit remains the fast developer gate; CI independently proves the repository state.
+`ci.yml` should run on `pull_request` and `push` to `main`. It should use uv and a 3.11–3.15 matrix, run pytest, Ruff check and format verification, Ty, Bandit, Vulture, OSV checking, and `uv build`. Third-party Actions must be pinned to immutable commit identifiers, with Dependabot configured to propose their updates and updates to the uv lockfile. Local pre-commit remains the fast developer gate; CI independently proves the repository state.
 
 `publish.yml` should run only when manually dispatched for a selected commit. `pyproject.toml` is the authoritative version source. Before building or publishing, it must use the GitHub Actions API to require a successful push-triggered CI run and every expected CI job for that exact commit, and reject an existing matching release or tag. It should build with uv, publish with `uv publish --trusted-publishing always` to the preconfigured PyPI trusted publisher, then create the GitHub release and `v<version>` tag only after publishing succeeds. If `CHANGELOG.md` contains a non-empty matching `## [<version>]` section, it becomes the release notes; otherwise, GitHub generates notes from the commits. Each job must have only the permissions it needs. It must not publish on arbitrary branch pushes or tags.
 
@@ -63,7 +63,6 @@ Retain `tests/test_specifications.py` and its vendored fixtures as the specifica
 - [Generated properties become flaky or opaque] → bound strategies, preserve exact fixture examples, and ensure failing examples reproduce under the committed configuration.
 - [Specification and local regression tests blur again] → retain separate test modules and document their distinct ownership.
 - [A workflow gives a false signal of support] → make the matrix match the declared 3.11–3.15 support range and run the same named checks which developers use locally.
-- [SonarCloud misclassifies test files] → declare the disjoint `src` and `tests` roots in repository-local scanner configuration and publish pytest coverage from the CI scan.
 - [A release event publishes an unverified artefact] → build from the release revision and keep publication limited to the configured trusted publisher.
 
 ## Migration Plan

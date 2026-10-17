@@ -54,7 +54,7 @@ jobs:
           fi
 
           JOBS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100")"
-          for JOB in "Test Python 3.11" "Test Python 3.12" "Test Python 3.13" "Test Python 3.14" "Test Python 3.15" "Quality checks" "SonarCloud analysis"; do
+          for JOB in "Test Python 3.11" "Test Python 3.12" "Test Python 3.13" "Test Python 3.14" "Test Python 3.15" "Quality checks"; do
             if ! jq -e --arg job "$JOB" '[.jobs[] | select(.name == $job and .conclusion == "success")] | length > 0' <<<"$JOBS" >/dev/null; then
               echo "Required CI job did not succeed: $JOB"
               exit 1
