@@ -13,11 +13,17 @@ def test_public_exports_are_available() -> None:
         "render",
         "cli_main",
         "ChevronError",
+        "compat",
+        "func",
+        "section",
         "__version__",
     ]
     assert callable(chevron.main)
     assert callable(chevron.render)
     assert callable(chevron.cli_main)
+    assert callable(chevron.compat)
+    assert callable(chevron.func)
+    assert callable(chevron.section)
     assert issubclass(chevron.ChevronError, SyntaxError)
     assert chevron.__version__ == version("chevron-ng")
 

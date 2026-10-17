@@ -6,7 +6,16 @@ except PackageNotFoundError:
     __version__ = "0+unknown"
 
 from .main import main, cli_main
-from .renderer import render
+from .renderer import compat, func, render, section
 from .tokenizer import ChevronError
 
-__all__ = ["main", "render", "cli_main", "ChevronError", "__version__"]
+__all__ = [
+    "main",
+    "render",
+    "cli_main",
+    "ChevronError",
+    "compat",
+    "func",
+    "section",
+    "__version__",
+]

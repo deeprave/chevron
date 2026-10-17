@@ -36,10 +36,25 @@ def _materialise_lambdas(value: object, namespace: dict[str, object]) -> object:
     return value
 
 
+def _declare_fixture_lambda(case: dict[str, object], data: object) -> object:
+    """Adapt reviewed fixture callbacks to Chevron's declared protocols."""
+
+    if not isinstance(data, dict) or not callable(data.get("lambda")):
+        return data
+
+    name = case["name"]
+    callback = data["lambda"]
+    if name.startswith("Interpolation") or name == "Escaping":
+        data["lambda"] = chevron.func(callback)
+    elif name.startswith("Section"):
+        data["lambda"] = chevron.section(callback)
+    return data
+
+
 @pytest.mark.parametrize("case", _fixture_cases())
 def test_mustache_specification_case(case: dict[str, object]) -> None:
     namespace: dict[str, object] = {}
-    data = _materialise_lambdas(case["data"], namespace)
+    data = _declare_fixture_lambda(case, _materialise_lambdas(case["data"], namespace))
     result = chevron.render(
         case["template"],
         data,
