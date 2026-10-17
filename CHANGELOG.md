@@ -6,6 +6,8 @@ All notable changes to Chevron are documented in this file.
 
 ### Added
 
+- Mustache-standard zero-argument interpolation lambdas and one-argument section lambdas now pass the pinned Mustache lambda fixtures when declared with `@chevron.func` and `@chevron.section`. Interpolation results are rendered with the configured render-default delimiters; section results start with their section's opening delimiters.
+- `@chevron.func`, `@chevron.section`, and `@chevron.compat` declare interpolation, Mustache-standard section, and Chevron two-argument compatibility protocols respectively. Undecorated registered two-argument callbacks remain compatible.
 - `chevron.render()` accepts an optional `lambdas=` mapping that supplies
   callable section tags for a render. In explicit mode, configured lambda names
   take precedence over template data.
@@ -30,6 +32,8 @@ All notable changes to Chevron are documented in this file.
   data; configured section lambdas can provide a constrained temporary scope.
 - Rejected callable template data behaves as missing and can emit a `warn=True`
   diagnostic.
+- Lambda callbacks that return `None` now render as empty output and can emit a `warn=True` diagnostic instead of raising a later type error.
+- Tokenisation diagnostics are now per render and nested rendering no longer shares module-level tokenizer state. Token-cache replay is limited to the legacy `@chevron.compat` callback helper.
 
 ### Modernised
 

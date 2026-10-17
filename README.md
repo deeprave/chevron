@@ -104,35 +104,46 @@ chevron.render(**args)
 ```
 
 chevron supports lambdas
+
+For new code, use the `lambdas=` mapping to declare the callable protocol for each render. Registered names are resolved before template data, and template-data callables are rejected in explicit mode. This keeps executable extensions separate from the data exposed to a template. This is the recommended mode for untrusted templates, although it is not a general template sandbox.
+
+Use `@chevron.func` for a zero-argument interpolation lambda. Chevron renders its returned text with the render's configured default delimiters, then applies the escaping requested by the interpolation tag. The decorator is required for this new protocol whether the callable is supplied through `lambdas=` or ordinary compatibility-mode template data.
+
 ```python
 import chevron
 
 
-def first(text, render):
-    # Return only the first occurrence of items.
-    result = render(text)
-    return [x.strip() for x in result.split(" || ") if x.strip()][0]
+@chevron.func
+def greeting():
+    return "{{name}}"
 
 
-def inject_x(text, render):
-    # inject data into scope
-    return render(text, {"x": "data"})
-
-
-args = {
-    "template": "Hello, {{# first}} {{x}} || {{y}} || {{z}} {{/ first}}!  {{# inject_x}} {{x}} {{/ inject_x}}",
-    "data": {"y": "foo", "z": "bar", "first": first, "inject_x": inject_x},
-}
-
-chevron.render(**args)
+chevron.render("Hello, {{greeting}}!", {"name": "Ada"}, lambdas={"greeting": greeting})
 ```
 
-For new code using this implementation, use the `lambdas=` mapping to provide callable section tags for a render. Chevron checks that mapping before template data: a configured lambda runs without resolving the same name from template data. When no lambda is configured, ordinary template data resolves the name; callable values found there are rejected in explicit mode. A section lambda receives the raw text between `{{#tagname}}` and `{{/tagname}}`.
+Use `@chevron.section` for a Mustache-standard one-argument section lambda. It receives the unprocessed text between its section tags and Chevron recursively renders its return value using the delimiters active when that section opens. The decorator is required for this new protocol in both explicit and compatibility modes.
 
 ```python
 import chevron
 
 
+@chevron.section
+def repeat(text):
+    return text + text
+
+
+chevron.render(
+    "{{#repeat}}{{name}}{{/repeat}}", {"name": "Ada"}, lambdas={"repeat": repeat}
+)
+```
+
+Use `@chevron.compat` for Chevron’s original two-argument section callback. It receives the historical compatibility text and a `render()` callback which can render it with optional temporary data. That helper starts with the render's configured default delimiters. Undecorated section callbacks continue to use this protocol, but the decorator makes compatibility usage explicit and easy to find.
+
+```python
+import chevron
+
+
+@chevron.compat
 def select_first(text, render):
     return render(text).split(" || ", 1)[0]
 
@@ -144,7 +155,7 @@ chevron.render(
 )
 ```
 
-Pass `lambdas={}` to configure no callable section tags explicitly. In explicit mode, callable values in template data are rejected and render as empty values; with `warn=True`, Chevron writes a diagnostic (currently to standard error). Callable values are also lookup leaves, so a template cannot traverse their attributes.
+Pass `lambdas={}` to configure no callable section tags explicitly. In explicit mode, callable values in template data are rejected and render as empty values; with `warn=True`, Chevron writes a diagnostic (currently to standard error). A lambda which returns `None` also renders as an empty value and emits that diagnostic when warnings are enabled. Callable values are also lookup leaves, so a template cannot traverse their attributes.
 
 This is intentional for all callable values, including callable instances and classes. For example, `{{build.version}}` does not traverse a callable `build` in explicit mode. Expose only the needed plain data through an authorised section lambda instead:
 
@@ -160,7 +171,7 @@ chevron.render(
 )
 ```
 
-Omitting `lambdas` (or passing `None`) retains Chevron's compatibility mode so existing two-argument section callbacks keep working. In this mode, callable values resolved through normal mapping or sequence lookup may execute, including after a non-callable object attribute. A callable obtained directly from an object attribute is still not invoked.
+Omitting `lambdas` (or passing `None`) retains Chevron's permissive compatibility mode so existing two-argument section callbacks keep working. In this mode, callable values resolved through normal mapping or sequence lookup may execute, including after a non-callable object attribute. A callable obtained directly from an object attribute is still not invoked. Undecorated interpolation callables keep their historic stringification behaviour; use `@chevron.func` to invoke one.
 
 For untrusted templates, always provide an explicit `lambdas` mapping, even if it is empty. This controls callable section execution only; it is not a general template sandbox. Keep secrets and rich objects out of template data, supply only plain values where possible.
 
