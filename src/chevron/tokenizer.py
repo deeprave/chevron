@@ -194,9 +194,7 @@ def tokenize(
     r_del = def_rdel
 
     def token(token_type, token_key, raw):
-        if include_raw:
-            return (token_type, token_key, raw)
-        return (token_type, token_key)
+        return (token_type, token_key, raw)
 
     try:
         while template:
@@ -206,7 +204,8 @@ def tokenize(
             # If the template is completed
             if not template:
                 # Then yield the literal and leave
-                yield token("literal", literal, literal)
+                raw_token = token("literal", literal, literal)
+                yield raw_token if include_raw else raw_token[:2]
                 break
 
             # Do the first check to see if we could be a standalone
@@ -275,11 +274,13 @@ def tokenize(
             # Start yielding
             # Ignore literals that are empty
             if literal != "" or (include_raw and raw_literal != ""):
-                yield token("literal", literal, raw_literal)
+                raw_token = token("literal", literal, raw_literal)
+                yield raw_token if include_raw else raw_token[:2]
 
             # Ignore comments and set delimiters
             if tag_type not in ["comment", "set delimiter?"]:
-                yield token(tag_type, tag_key, raw_tag)
+                raw_token = token(tag_type, tag_key, raw_tag)
+                yield raw_token if include_raw else raw_token[:2]
             elif include_raw and tag_type == "comment":
                 yield token(tag_type, tag_key, raw_tag)
 
