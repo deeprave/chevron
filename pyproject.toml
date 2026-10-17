@@ -5,6 +5,9 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-name = "chevron"
 
+[tool.uv]
+required-version = "==0.13.1"
+
 [project]
 name = "chevron-ng"
 version = "0.15.0"
@@ -35,6 +38,7 @@ chevron = "chevron:cli_main"
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.170.1",
     "pytest",
     "pytest-cov>=7.1.0",
     "ruff",
