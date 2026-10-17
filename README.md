@@ -26,6 +26,10 @@ If you find a test that Chevron does not pass, please [report it](https://github
 
 Chevron requires Python 3.11 or later.
 
+Development and verification
+----------------------------
+
+Install the development environment with `uv sync --dev`, then run `uv run pytest`. Chevron's own behavioural tests are separate from the vendored Mustache specification fixtures, which are retained unchanged as the deterministic conformance suite. Bounded Hypothesis properties complement those examples by exercising renderer and tokenizer invariants over generated input.
 
 USAGE
 -----

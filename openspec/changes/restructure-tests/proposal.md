@@ -10,8 +10,10 @@ Chevron's test suite mixes a large legacy `unittest.TestCase` module with newer 
 - Reorganise tests by externally observable renderer, tokenizer, public-API, lambda, partial, and regression behaviour.
 - Combine structurally identical cases with readable `pytest.mark.parametrize` tables while retaining distinct behaviour where setup or assertions differ.
 - Separate Chevron behavioural regressions from the vendored Mustache specification harness and retain the fixture suite as an independent compatibility signal.
-- Add targeted Hypothesis property tests only where generated inputs can assert stable renderer/tokenizer invariants; do not use generated testing as a substitute for named regressions or specification fixtures.
+- Retain the vendored upstream Mustache specification cases byte-for-byte as the deterministic, named conformance oracle. Add bounded Hypothesis property tests only in Chevron-owned coverage where generated inputs can assert stable renderer/tokenizer invariants; do not replace or rewrite specification fixtures or named regressions with generated testing.
 - Remove redundant incremental and framework-only tests discovered during the migration, preserving coverage for observable production behaviour.
+- Add a `ci.yml` workflow for pull requests and pushes to `main`, covering the supported Python 3.11–3.15 range, the project’s test/static-analysis/build checks, and CI-based SonarCloud analysis with explicit source and test scopes. Pin third-party Actions to immutable commits and use Dependabot to track Action and uv dependency updates.
+- Add a manually dispatched `publish.yml` trusted-publisher workflow which derives the release version from `pyproject.toml`, verifies CI for the selected commit, publishes its build to PyPI using the already configured OIDC publisher, then creates the matching GitHub release and tag with version-specific changelog notes when available.
 
 ## Capabilities
 
@@ -25,4 +27,4 @@ None. Existing OpenSpec requirements remain the behavioural oracle; no requireme
 
 ## Impact
 
-Affected areas are the `tests/` suite, development dependencies, pytest configuration, and test documentation. The renderer, tokenizer, public API, vendored Mustache fixture contents, package runtime dependencies, and published behaviour are out of scope.
+Affected areas are the `tests/` suite, development dependencies, pytest configuration, test documentation, and GitHub workflows. The renderer, tokenizer, public API, vendored Mustache fixture contents, package runtime dependencies, and published behaviour are out of scope.
