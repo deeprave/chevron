@@ -242,14 +242,14 @@ def tokenize(
                     raise ChevronError(
                         f'Trying to close tag "{tag_key}"\n'
                         "Looks like it was not opened.\n"
-                        f"line {state.current_line + 1}"
+                        f"line {state.current_line}"
                     )
                 if tag_key != last_section:
                     # Otherwise we need to complain
                     raise ChevronError(
                         f'Trying to close tag "{tag_key}"\n'
                         f'last open tag is "{last_section}"\n'
-                        f"line {state.current_line + 1}"
+                        f"line {state.current_line}"
                     )
 
             # Do the second check to see if we're a standalone
@@ -266,6 +266,7 @@ def tokenize(
                     if template
                     else remaining_template
                 )
+                state.current_line += raw_standalone_suffix.count("\n")
 
                 # Partials need to keep the spaces on their left
                 if tag_type != "partial":
