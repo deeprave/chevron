@@ -2,6 +2,12 @@
 
 All notable changes to Chevron are documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- The internal tokenizer now accepts source text only. Direct callers that supply file-like objects receive a `TypeError`; `chevron.render()` continues to accept file-like templates. Moving input I/O to the renderer boundary prepares the package for async rendering.
+
 ## [0.15.0] - 2026-10-18
 
 ### Added

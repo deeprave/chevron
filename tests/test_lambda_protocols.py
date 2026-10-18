@@ -1,5 +1,7 @@
 """Behavioural tests for declared Mustache and Chevron lambda protocols."""
 
+from io import StringIO
+
 import chevron
 import pytest
 from chevron.tokenizer import ChevronError, tokenize
@@ -13,6 +15,11 @@ def test_tokenize_include_raw_exposes_source_without_changing_default_mode() -> 
     assert list(tokenize("{{! comment }}", include_raw=True)) == [
         ("comment", "comment", "{{! comment }}")
     ]
+
+
+def test_tokenize_rejects_file_like_inputs_with_actionable_guidance() -> None:
+    with pytest.raises(TypeError, match=r"use chevron\.render\(\) for file-like input"):
+        list(tokenize(StringIO("{{name}}")))
 
 
 def test_nested_lambda_tokenisation_does_not_leak_syntax_state() -> None:
@@ -74,19 +81,6 @@ def test_iterable_section_collects_nested_inverted_sections_with_the_same_name()
         )
         == "first;second;"
     )
-
-
-def test_tokenize_restores_private_state_stack_when_read_fails() -> None:
-    class BrokenTemplate:
-        def read(self) -> str:
-            raise OSError("unable to read template")
-
-    state_stack = []
-
-    with pytest.raises(OSError, match="unable to read template"):
-        list(tokenize(BrokenTemplate(), _state_stack=state_stack))
-
-    assert state_stack == []
 
 
 def test_declared_function_renders_escaped_and_unescaped_interpolation() -> None:
@@ -330,14 +324,23 @@ def test_undecorated_registered_lambda_remains_compatibility_protocol() -> None:
     )
 
 
-def test_undecorated_interpolation_callable_is_not_invoked() -> None:
+@pytest.mark.parametrize("explicit", [False, True])
+def test_undecorated_interpolation_callable_is_not_invoked(explicit: bool) -> None:
     calls: list[None] = []
 
-    def value() -> str:
-        calls.append(None)
-        return "unexpected"
+    class Value:
+        def __call__(self) -> str:
+            calls.append(None)
+            return "unexpected"
 
-    assert chevron.render("{{value}}", {"value": value}) != "unexpected"
+        def __str__(self) -> str:
+            return "callable value"
+
+    value = Value()
+    options = {"lambdas": {"value": value}} if explicit else {}
+    assert chevron.render("{{value}}", {"value": value}, **options) == (
+        "" if explicit else "callable value"
+    )
     assert calls == []
 
 
@@ -356,15 +359,29 @@ def test_declared_function_takes_precedence_over_template_data() -> None:
     )
 
 
-def test_declared_function_is_not_executed_as_a_section() -> None:
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize(
+    ("decorator", "template"),
+    [
+        (chevron.func, "{{#value}}body{{/value}}"),
+        (chevron.section, "{{value}}|{{{value}}}"),
+        (chevron.compat, "{{value}}|{{{value}}}"),
+    ],
+)
+def test_incompatible_lambda_tag_does_not_invoke_callable(
+    explicit: bool, decorator, template: str
+) -> None:
     calls: list[str] = []
 
-    @chevron.func
-    def value() -> str:
+    @decorator
+    def value(*args) -> str:
         calls.append("called")
         return "unexpected"
 
-    assert chevron.render("{{#value}}body{{/value}}", lambdas={"value": value}) == ""
+    options = {"lambdas": {"value": value}} if explicit else {}
+    assert chevron.render(template, {"value": value}, **options) == (
+        "" if decorator is chevron.func else "|"
+    )
     assert calls == []
 
 

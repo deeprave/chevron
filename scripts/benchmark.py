@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 
 from sys import argv
-from timeit import timeit
+from timeit import repeat
 
 import chevron
 
 
-def make_test(template=None, data=None, expected=None):
+def make_test(template=None, data=None, expected=None, **options):
     def test():
-        result = chevron.render(template, data)
+        result = chevron.render(template, data, **options)
         if result != expected:
             error = "Test failed:\n-- got --\n{}\n-- expected --\n{}"
-            raise Exception(error.format(result, expected))
+            raise AssertionError(error.format(result, expected))
 
     return test
 
@@ -71,9 +71,48 @@ def main(times):
 """,
     }
 
-    test = make_test(**args)
+    def callback(text, render):
+        return render(text)
 
-    print(timeit(test, number=times))
+    @chevron.func
+    def function():
+        return "{{name}}"
+
+    @chevron.section
+    def section(text):
+        return text
+
+    workloads = {
+        "ordinary": args,
+        "explicit-empty": {**args, "lambdas": {}},
+        "partial": {
+            "template": "{{>part}}",
+            "data": {"name": "world"},
+            "partials_dict": {"part": "hello {{name}}"},
+            "expected": "hello world",
+        },
+    }
+    for explicit in (False, True):
+        for name, template, callbacks in (
+            ("compat", "{{#call}}{{name}}{{/call}}", {"call": callback}),
+            ("function", "{{call}}", {"call": function}),
+            ("section", "{{#call}}{{name}}{{/call}}", {"call": section}),
+            (
+                "nested-callback",
+                "{{#call}}{{#call}}{{name}}{{/call}}{{/call}}",
+                {"call": callback},
+            ),
+        ):
+            workloads[f"{name}-{'explicit' if explicit else 'permissive'}"] = {
+                "template": template,
+                "data": {"name": "world", **({} if explicit else callbacks)},
+                "lambdas": callbacks if explicit else None,
+                "expected": "world",
+            }
+
+    for name, workload in workloads.items():
+        timings = repeat(make_test(**workload), number=times, repeat=5)
+        print(f"{name}: {', '.join(f'{value:.6f}' for value in timings)} seconds")
 
 
 if __name__ == "__main__":

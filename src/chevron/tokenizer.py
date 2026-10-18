@@ -131,20 +131,16 @@ def tokenize(
     def_ldel="{{",
     def_rdel="}}",
     include_raw=False,
-    *,
-    _state=None,
-    _state_stack=None,
 ):
     """Tokenize a mustache template
 
-    Tokenizes a mustache template in a generator fashion,
-    using file-like objects. It also accepts a string containing
-    the template.
+    Tokenizes template text in a generator fashion without performing I/O.
+    The renderer reads file-like inputs before calling this function.
 
 
     Arguments:
 
-    template -- a file-like object, or a string of a mustache template
+    template -- a string containing a mustache template
 
     def_ldel -- The default left delimiter
                 ("{{" by default, as in spec compliant mustache)
@@ -177,17 +173,20 @@ def tokenize(
 
     And tag_key is either the key or in the case of a literal tag,
     the literal itself.
+
+    Raises:
+
+    TypeError -- If template is not source text. File-like templates are
+                 supported by chevron.render(), which reads them before
+                 tokenization.
     """
 
-    state = _state if _state is not None else _TokenizationState()
-    # If the template is a file-like object then read it
-    try:
-        template = template.read()
-    except AttributeError:
-        pass
+    if not isinstance(template, str):
+        raise TypeError(
+            "tokenize() requires template text; use chevron.render() for file-like input"
+        )
 
-    if _state_stack is not None:
-        _state_stack.append(state)
+    state = _TokenizationState()
 
     is_standalone = True
     open_sections = []
@@ -197,108 +196,100 @@ def tokenize(
     def token(token_type, token_key, raw):
         return (token_type, token_key, raw)
 
-    try:
-        while template:
-            literal, template = grab_literal(template, l_del, state)
-            raw_literal = literal
+    while template:
+        literal, template = grab_literal(template, l_del, state)
+        raw_literal = literal
 
-            # If the template is completed
-            if not template:
-                # Then yield the literal and leave
-                raw_token = token("literal", literal, literal)
-                yield raw_token if include_raw else raw_token[:2]
-                break
+        # If the template is completed
+        if not template:
+            # Then yield the literal and leave
+            raw_token = token("literal", literal, literal)
+            yield raw_token if include_raw else raw_token[:2]
+            break
 
-            # Do the first check to see if we could be a standalone
-            is_standalone = l_sa_check(template, literal, is_standalone)
+        # Do the first check to see if we could be a standalone
+        is_standalone = l_sa_check(template, literal, is_standalone)
 
-            # Parse the tag
-            raw_tag = template
-            tag, template = parse_tag(template, l_del, r_del, state)
-            tag_type, tag_key = tag
-            raw_tag = l_del + raw_tag[: len(raw_tag) - len(template)]
+        # Parse the tag
+        raw_tag = template
+        tag, template = parse_tag(template, l_del, r_del, state)
+        tag_type, tag_key = tag
+        raw_tag = l_del + raw_tag[: len(raw_tag) - len(template)]
 
-            # Special tag logic
+        # Special tag logic
 
-            # If we are a set delimiter tag
-            if tag_type == "set delimiter":
-                # Then get and set the delimiters
-                dels = tag_key.strip().split(" ")
-                l_del, r_del = dels[0], dels[-1]
+        # If we are a set delimiter tag
+        if tag_type == "set delimiter":
+            # Then get and set the delimiters
+            dels = tag_key.strip().split(" ")
+            l_del, r_del = dels[0], dels[-1]
 
-            # If we are a section tag
-            elif tag_type in ["section", "inverted section"]:
-                # Then open a new section
-                open_sections.append(tag_key)
-                state.last_tag_line = state.current_line
+        # If we are a section tag
+        elif tag_type in ["section", "inverted section"]:
+            # Then open a new section
+            open_sections.append(tag_key)
+            state.last_tag_line = state.current_line
 
-            # If we are an end tag
-            elif tag_type == "end":
-                # Then check to see if the last opened section
-                # is the same as us
-                try:
-                    last_section = open_sections.pop()
-                except IndexError:
-                    raise ChevronError(
-                        f'Trying to close tag "{tag_key}"\n'
-                        "Looks like it was not opened.\n"
-                        f"line {state.current_line}"
-                    )
-                if tag_key != last_section:
-                    # Otherwise we need to complain
-                    raise ChevronError(
-                        f'Trying to close tag "{tag_key}"\n'
-                        f'last open tag is "{last_section}"\n'
-                        f"line {state.current_line}"
-                    )
-
-            # Do the second check to see if we're a standalone
-            is_standalone = r_sa_check(template, tag_type, is_standalone)
-
-            # Which if we are
-            raw_standalone_suffix = ""
-            if is_standalone:
-                # Remove the stuff before the newline
-                remaining_template = template
-                template = template.split("\n", 1)[-1]
-                raw_standalone_suffix = (
-                    remaining_template[: -len(template)]
-                    if template
-                    else remaining_template
+        # If we are an end tag
+        elif tag_type == "end":
+            # Then check to see if the last opened section
+            # is the same as us
+            try:
+                last_section = open_sections.pop()
+            except IndexError:
+                raise ChevronError(
+                    f'Trying to close tag "{tag_key}"\n'
+                    "Looks like it was not opened.\n"
+                    f"line {state.current_line}"
                 )
-                state.current_line += raw_standalone_suffix.count("\n")
+            if tag_key != last_section:
+                # Otherwise we need to complain
+                raise ChevronError(
+                    f'Trying to close tag "{tag_key}"\n'
+                    f'last open tag is "{last_section}"\n'
+                    f"line {state.current_line}"
+                )
 
-                # Partials need to keep the spaces on their left
-                if tag_type != "partial":
-                    # But other tags don't
-                    literal = literal.rstrip(" ")
+        # Do the second check to see if we're a standalone
+        is_standalone = r_sa_check(template, tag_type, is_standalone)
 
-            # Start yielding
-            # Ignore literals that are empty
-            if literal != "" or (include_raw and raw_literal != ""):
-                raw_token = token("literal", literal, raw_literal)
-                yield raw_token if include_raw else raw_token[:2]
-
-            # Ignore comments and set delimiters
-            if tag_type not in ["comment", "set delimiter?"]:
-                raw_token = token(tag_type, tag_key, raw_tag)
-                yield raw_token if include_raw else raw_token[:2]
-            elif include_raw and tag_type == "comment":
-                yield token(tag_type, tag_key, raw_tag)
-
-            # Preserve source removed by standalone processing for standard section
-            # lambdas without restoring it to rendered output.
-            if include_raw and raw_standalone_suffix:
-                yield token("literal", "", raw_standalone_suffix)
-
-        if open_sections:
-            raise ChevronError(
-                "Unexpected EOF\n"
-                f'the tag "{open_sections[-1]}" was never closed\n'
-                f"was opened at line {state.last_tag_line}"
+        # Which if we are
+        raw_standalone_suffix = ""
+        if is_standalone:
+            # Remove the stuff before the newline
+            remaining_template = template
+            template = template.split("\n", 1)[-1]
+            raw_standalone_suffix = (
+                remaining_template[: -len(template)] if template else remaining_template
             )
-    finally:
-        if _state_stack is not None:
-            if not _state_stack or _state_stack[-1] is not state:
-                raise RuntimeError("tokenization state stack is unbalanced")
-            _state_stack.pop()
+            state.current_line += raw_standalone_suffix.count("\n")
+
+            # Partials need to keep the spaces on their left
+            if tag_type != "partial":
+                # But other tags don't
+                literal = literal.rstrip(" ")
+
+        # Start yielding
+        # Ignore literals that are empty
+        if literal != "" or (include_raw and raw_literal != ""):
+            raw_token = token("literal", literal, raw_literal)
+            yield raw_token if include_raw else raw_token[:2]
+
+        # Ignore comments and set delimiters
+        if tag_type not in ["comment", "set delimiter?"]:
+            raw_token = token(tag_type, tag_key, raw_tag)
+            yield raw_token if include_raw else raw_token[:2]
+        elif include_raw and tag_type == "comment":
+            yield token(tag_type, tag_key, raw_tag)
+
+        # Preserve source removed by standalone processing for standard section
+        # lambdas without restoring it to rendered output.
+        if include_raw and raw_standalone_suffix:
+            yield token("literal", "", raw_standalone_suffix)
+
+    if open_sections:
+        raise ChevronError(
+            "Unexpected EOF\n"
+            f'the tag "{open_sections[-1]}" was never closed\n'
+            f"was opened at line {state.last_tag_line}"
+        )
