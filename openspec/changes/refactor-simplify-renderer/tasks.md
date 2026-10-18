@@ -26,5 +26,6 @@
 
 - [x] 5.1 Consolidate recursive partial and iterable rendering through the engine, retaining the existing partial loader policy; verify mapped, filesystem, containment, delimiter and indentation tests.
 - [x] 5.2 Remove unreachable Python 2 branches and obsolete forwarding helpers, retaining supported string conversions and import locations; verify the current behavioural and pinned conformance suites pass and compare the benchmark scenarios with their recorded baseline.
+- [x] 5.3 Preserve falsey non-text public template inputs as empty output, explicitly reject malformed direct token tuples, and remove residual state-owned tokenizer forwarding; update behavioural coverage and design ownership notes.
 
 Routine repository checks, OpenSpec verification, review and Git delivery remain workflow hygiene rather than tracked implementation tasks. The subsequent Mustache conformance change retains responsibility for new syntax and the dotted-name behaviour correction.
