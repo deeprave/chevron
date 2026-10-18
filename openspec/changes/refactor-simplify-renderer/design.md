@@ -50,7 +50,7 @@ Share the None-result diagnostic, but preserve distinct conversion rules: standa
 ### Separate configuration, invocation state and frames
 
 - Configuration holds partial lookup settings, warning preference, and render-default delimiters. Select and retain the source policy alongside it. Preserve caller-owned mapping behaviour except for the already-snapshotted lambda mapping.
-- Invocation state holds compatibility token cache and nested tokenisation diagnostic state. Each public render creates fresh state; recursion shares it deliberately.
+- Invocation state holds the compatibility token cache. Tokenizer diagnostics remain private to each tokenisation call. Each public render creates fresh state; recursion shares its compatibility cache deliberately.
 - A frame carries scopes, active delimiters and padding for one recursive rendering operation. Local output and token cursors remain invocation locals, not mutable renderer attributes.
 
 Retain the existing scope restoration guard and child-scope construction semantics in the first extraction. Do not deep-copy data, freeze scopes, or assume a scope must be a dict. Compatibility callbacks capture their frame and the bound engine operation, not a module-level active context or a mutable engine-wide current-frame pointer. Truthy temporary callback data prepends a child scope; falsey temporary data retains the caller's scopes as today. Every recursive entry restores incoming scope-list contents after success or failure.
@@ -59,7 +59,7 @@ Independent public renders remain isolated for concurrent calls, including calls
 
 ### Centralise section collection and recursive entry points
 
-The renderer owns template input reading and always supplies text to the tokenizer. Remove the tokenizer's file-like `.read()` support directly, without a wrapper or alternative compatibility entry point. Preserve file-like input support on `render()`, including caller ownership and read-error propagation. Move tests of reading failures to the renderer boundary. Existing token sequences still bypass tokenisation. This input-contract narrowing is explicitly authorised; the behaviour-preservation goal applies to rendering, not the removed tokenizer reader convenience.
+The renderer owns template input reading and always supplies text to the tokenizer. Remove the tokenizer's file-like `.read()` support directly, without a wrapper or alternative compatibility entry point. Preserve file-like input support on `render()`, including caller ownership and read-error propagation. Preserve historic empty output for falsey non-text templates at the public render boundary. Move tests of reading failures to the renderer boundary. Existing token sequences still bypass tokenisation and must contain exactly two or three values. This input-contract narrowing is explicitly authorised; the behaviour-preservation goal applies to rendering, not the removed tokenizer reader convenience.
 
 Introduce one section-body collector returning the enclosed token sequence and opening/ending delimiter state. Callable and iterable paths share matching logic, including nested sections and inverted sections with the same name. Derive exact source and compatibility reconstruction from that body only when their respective handlers need them. Preserve fallback reconstruction for public two-item tokens and source-only comments/whitespace for standard lambdas. Compatibility reconstruction keeps its existing cache key and filtered token representation.
 

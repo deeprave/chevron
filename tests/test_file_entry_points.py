@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from io import StringIO
 from pathlib import Path
 
@@ -30,6 +31,34 @@ def test_render_reads_from_current_position_and_leaves_reader_open() -> None:
         )
         assert not source.closed
         assert source.read() == ""
+
+
+@pytest.mark.parametrize("template", [None, 0, False], ids=["none", "zero", "false"])
+def test_render_preserves_falsey_non_text_templates_as_empty(template: object) -> None:
+    assert chevron.render(template) == ""
+
+
+@pytest.mark.parametrize("partial", [None, 0, False], ids=["none", "zero", "false"])
+def test_render_preserves_falsey_partial_values_as_empty(partial: object) -> None:
+    assert chevron.render(
+        "before{{> optional}}after", partials_dict={"optional": partial}
+    ) == ("beforeafter")
+
+
+def test_compatibility_callback_can_render_none_as_empty() -> None:
+    def callback(text: str, render: Callable[[object], str]) -> str:
+        return render(None)
+
+    assert (
+        chevron.render("{{#callback}}ignored{{/callback}}", {"callback": callback})
+        == ""
+    )
+
+
+@pytest.mark.parametrize("tokens", [("literal",), ("literal", "text", "raw", "extra")])
+def test_render_rejects_malformed_token_tuples(tokens: tuple[str, ...]) -> None:
+    with pytest.raises(TypeError, match="two or three values"):
+        chevron.render([tokens])
 
 
 def test_main_renders_template_data_and_filesystem_partials() -> None:

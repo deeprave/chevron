@@ -1,7 +1,7 @@
 from os import linesep
 from pathlib import Path
 
-from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import update_wrapper
 from typing import Any, Protocol
@@ -227,12 +227,16 @@ class _RenderState:
 
     token_cache: dict[str, list[tuple]] = field(default_factory=dict)
 
-    def tokenize(
-        self, template: str, delimiters: tuple[str, str]
-    ) -> Generator[tuple, None, None]:
-        """Tokenize source text for this render using frame-local delimiters."""
 
-        yield from _tokenize(template, *delimiters, include_raw=True)
+def _validated_tokens(tokens: Sequence[tuple]) -> Iterator[tuple]:
+    """Yield direct token input after enforcing Chevron's public tuple shapes."""
+
+    for token in tokens:
+        match len(token):
+            case 2 | 3:
+                yield token
+            case _:
+                raise TypeError("template tokens must contain two or three values")
 
 
 class _SourcePolicy(Protocol):
@@ -387,12 +391,14 @@ class ChevronRender:
         token_stream = None
         try:
             if isinstance(template, Sequence) and not isinstance(template, str):
-                tokens = iter(template)
+                tokens = _validated_tokens(template)
             else:
                 reader = getattr(template, "read", None)
                 if reader is not None:
                     template = reader()
-                token_stream = self.state.tokenize(template, frame.delimiters)
+                if not template and not isinstance(template, str):
+                    template = ""
+                token_stream = _tokenize(template, *frame.delimiters, include_raw=True)
                 tokens = token_stream
             return self.render_tokens(tokens, frame)
         finally:
