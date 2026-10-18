@@ -46,8 +46,22 @@ def test_render_preserves_falsey_partial_values_as_empty(partial: object) -> Non
 
 
 def test_compatibility_callback_can_render_none_as_empty() -> None:
+    calls = []
+
     def callback(text: str, render: Callable[[object], str]) -> str:
+        calls.append(text)
         return render(None)
+
+    assert (
+        chevron.render("{{#callback}}ignored{{/callback}}", {"callback": callback})
+        == ""
+    )
+    assert calls == ["ignored"]
+
+
+def test_compatibility_callback_can_render_unhashable_falsey_data_as_empty() -> None:
+    def callback(text: str, render: Callable[[object], str]) -> str:
+        return render({})
 
     assert (
         chevron.render("{{#callback}}ignored{{/callback}}", {"callback": callback})
@@ -59,6 +73,16 @@ def test_compatibility_callback_can_render_none_as_empty() -> None:
 def test_render_rejects_malformed_token_tuples(tokens: tuple[str, ...]) -> None:
     with pytest.raises(TypeError, match="two or three values"):
         chevron.render([tokens])
+
+
+@pytest.mark.parametrize("token", ["li", "raw"], ids=["two", "three"])
+def test_render_rejects_string_tokens(token: str) -> None:
+    with pytest.raises(TypeError, match="non-string sequences"):
+        chevron.render([token])
+
+
+def test_render_accepts_list_tokens() -> None:
+    assert chevron.render([["literal", "text"]]) == "text"
 
 
 def test_main_renders_template_data_and_filesystem_partials() -> None:

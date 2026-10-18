@@ -229,9 +229,11 @@ class _RenderState:
 
 
 def _validated_tokens(tokens: Sequence[tuple]) -> Iterator[tuple]:
-    """Yield direct token input after enforcing Chevron's public tuple shapes."""
+    """Yield direct token input after enforcing Chevron's public token shapes."""
 
     for token in tokens:
+        if isinstance(token, str):
+            raise TypeError("template tokens must be non-string sequences")
         match len(token):
             case 2 | 3:
                 yield token
@@ -463,6 +465,8 @@ class ChevronRender:
 
     def compatibility_render(self, template: Any, frame: _RenderFrame) -> str:
         """Only legacy callbacks replay the invocation's reconstructed tokens."""
+        if not template and not isinstance(template, (str, Sequence)):
+            template = ""
         if not (isinstance(template, Sequence) and not isinstance(template, str)):
             if template in self.state.token_cache:
                 template = self.state.token_cache[template]
