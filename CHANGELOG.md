@@ -2,7 +2,7 @@
 
 All notable changes to Chevron are documented in this file.
 
-## [Unreleased]
+## [0.15.0] - 2026-10-18
 
 ### Added
 
