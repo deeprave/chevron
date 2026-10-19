@@ -159,7 +159,7 @@ chevron.render(
 )
 ```
 
-Pass `lambdas={}` to configure no callable section tags explicitly. In explicit mode, callable values in template data are rejected and render as empty values; with `warn=True`, Chevron writes a diagnostic (currently to standard error). A lambda which returns `None` also renders as an empty value and emits that diagnostic when warnings are enabled. Callable values are also lookup leaves, so a template cannot traverse their attributes.
+Pass `lambdas={}` to configure no callable section tags explicitly. In explicit mode, callable values in template data are rejected and render as empty values; with `warn=True`, Chevron writes a diagnostic to standard error. A lambda which returns `None` also renders as an empty value and emits that diagnostic when warnings are enabled. Callable values are also lookup leaves, so a template cannot traverse their attributes.
 
 This is intentional for all callable values, including callable instances and classes. For example, `{{build.version}}` does not traverse a callable `build` in explicit mode. Expose only the needed plain data through an authorised section lambda instead:
 
@@ -187,6 +187,31 @@ chevron.render(template, data, partials_path="/srv/app/partials")
 
 Use `partials_path="."` only when restoring the historic process-current-
 directory lookup intentionally, but this can potentially leak server data if poorly crafted or untrusted templates are rendered.
+
+Diagnostics
+-----------
+
+Library rendering is quiet by default. Set `warn=True` to send recoverable warnings and unhandled template errors to standard error using Chevron's established warning text. Exceptions still propagate normally.
+
+Applications can instead provide a per-render `logging.Logger` or `logging.LoggerAdapter`. Supplying one replaces Chevron's default diagnostic destination regardless of `warn`; Chevron leaves handlers, levels and propagation entirely under application control.
+
+```python
+import logging
+
+import chevron
+
+
+logger = logging.getLogger(__name__)
+chevron.render(
+    "Hello {{name}}",
+    {"name": "Ada"},
+    logger=logger,
+)
+```
+
+With no application logger, `warn=True` selects Chevron's default `logging.WARNING` standard-error behaviour. A supplied logger is independent of `warn`; pass `log_level=logging.INFO` for render start and successful-completion messages, or `log_level=logging.DEBUG` for bounded name resolution, lambda dispatch and partial decisions. Debug messages never include template content, template-data values, callable representations or absolute filesystem paths. Applications should treat template-controlled names and user-authored exception messages as untrusted text.
+
+Logging runs synchronously in rendering order. A supplied logger should therefore remain minimal; applications needing queue-backed logging can configure that through Python logging.
 
 
 TODO

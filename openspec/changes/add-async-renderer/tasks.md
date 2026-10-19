@@ -10,7 +10,7 @@ Prerequisite: implement `refactor-simplify-renderer`. Use its completed shared c
 ## 2. Implement shared-semantic async execution
 
 - [ ] 2.1 Build the private async engine using the refactored policies, tokens, body collector and formatting helpers, with branch-owned frames and explicit recursive awaits; verify normal, inverted and iterable sections, token sequences, delimiters and padding against synchronous public-API cases on both backends.
-- [ ] 2.2 Extract diagnostic production from direct writes and add an awaited async sink while retaining immediate synchronous diagnostics; verify warning text, order and failure-path delivery under both APIs.
+- [ ] 2.2 Extract diagnostic production from direct writes while retaining immediate delivery through the shared synchronous Python logger under both APIs; verify default stderr and application-logger text, order and failure-path delivery, and briefly document that an async-render logger should remain minimal because it blocks that render.
 
 ## 3. Add awaitable lambda protocols
 

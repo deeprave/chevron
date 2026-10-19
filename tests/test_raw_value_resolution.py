@@ -53,7 +53,7 @@ def test_falsey_legacy_callable_section_executes(template: str, data: dict) -> N
     assert chevron.render(template, data) == "called"
 
 
-def test_falsey_template_callable_is_rejected_in_explicit_mode(capsys) -> None:
+def test_falsey_template_callable_is_rejected_in_explicit_mode(caplog) -> None:
     assert (
         chevron.render(
             "{{#callback}}body{{/callback}}",
@@ -63,9 +63,9 @@ def test_falsey_template_callable_is_rejected_in_explicit_mode(capsys) -> None:
         )
         == ""
     )
-    assert capsys.readouterr().err == (
-        "Callable template data 'callback' is rejected when lambdas= is supplied\n"
-    )
+    assert caplog.messages == [
+        "Callable template data 'callback' is rejected when lambdas= is supplied"
+    ]
 
 
 def test_falsey_registered_callable_section_executes() -> None:
@@ -107,9 +107,9 @@ def test_ordinary_falsey_values_retain_tag_behaviour(
 
 
 @pytest.mark.parametrize("template", ["{{missing}}", "{{{missing}}}"])
-def test_missing_interpolation_renders_empty_and_warns(template: str, capsys) -> None:
+def test_missing_interpolation_renders_empty_and_warns(template: str, caplog) -> None:
     assert chevron.render(template, {}, warn=True) == ""
-    assert capsys.readouterr().err == "Could not find key 'missing'\n"
+    assert caplog.messages == ["Could not find key 'missing'"]
 
 
 def test_missing_and_empty_sections_use_ordinary_falsey_behaviour() -> None:

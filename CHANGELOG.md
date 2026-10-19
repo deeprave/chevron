@@ -7,6 +7,7 @@ All notable changes to Chevron are documented in this file.
 ### Changed
 
 - The internal tokenizer now accepts source text only. Direct callers that supply file-like objects receive a `TypeError`; `chevron.render()` continues to accept file-like templates. Moving input I/O to the renderer boundary prepares the package for async rendering.
+- `chevron.render()` now accepts keyword-only standard-library `logger=` and `log_level=` options for per-render diagnostics. A supplied `logging.Logger` or `logging.LoggerAdapter` remains under application configuration, while `warn` retains its established truthiness-based opt-in behaviour for Chevron's default warning output.
 
 ## [0.15.0] - 2026-10-18
 

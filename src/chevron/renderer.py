@@ -1,20 +1,32 @@
-from os import linesep
-from pathlib import Path
-
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import update_wrapper
+import logging
+from pathlib import Path
 from typing import Any, Protocol
 
-from .tokenizer import tokenize as _tokenize
-
-
-import sys
+from .tokenizer import ChevronError, tokenize as _tokenize
 
 _MISSING = object()
 _FUNCTION_PROTOCOL = "function"
 _SECTION_PROTOCOL = "section"
 _COMPAT_PROTOCOL = "compat"
+_LOGGER_NAME = "chevron"
+_DEFAULT_LOGGER = logging.getLogger(_LOGGER_NAME)
+
+
+class _RenderLogger(logging.LoggerAdapter):
+    """Apply one render's diagnostic threshold to its selected logger."""
+
+    def __init__(
+        self, logger: logging.Logger | logging.LoggerAdapter, log_level: int
+    ) -> None:
+        super().__init__(logger, {})
+        self.log_level = log_level
+
+    def log(self, level: int, message: object, *args, **kwargs) -> None:
+        if level >= self.log_level:
+            super().log(level, message, *args, **kwargs)
 
 
 @dataclass
@@ -117,7 +129,7 @@ def _html_escape(string):
 def _get_key(
     key,
     scopes,
-    warn=False,
+    logger: _RenderLogger,
     allow_callable_traversal=True,
     value_handler=None,
 ):
@@ -129,6 +141,7 @@ def _get_key(
     if key == ".":
         # Then just return the current scope
         scope = scopes[0]
+        logger.debug("Resolved current template scope")
         return value_handler(scope) if value_handler is not None else scope
 
     # Loop through the scopes
@@ -154,35 +167,42 @@ def _get_key(
                         # Try as a list
                         scope = scope[int(child)]
 
-            return value_handler(scope) if value_handler is not None else scope
+            value = value_handler(scope) if value_handler is not None else scope
         except (AttributeError, KeyError, IndexError, ValueError):
-            # We couldn't find the key in the current scope
-            # We'll try again on the next pass
-            pass
+            # Lookup and value normalisation both preserve fallback behaviour.
+            continue
+
+        logger.debug("Resolved template name '%s' from template data", key)
+        return value
 
     # We couldn't find the key in any of the scopes
 
-    if warn:
-        if blocked_callable_traversal:
-            message = (
-                "Could not resolve '%s': callable values cannot be traversed "
-                "when lambdas= is supplied"
-            ) % key
-        else:
-            message = "Could not find key '%s'" % key
-        sys.stderr.write("%s%s" % (message, linesep))
+    logger.debug("Template name '%s' was not found", key)
+    if blocked_callable_traversal:
+        logger.warning(
+            "Could not resolve '%s': callable values cannot be traversed "
+            "when lambdas= is supplied",
+            key,
+        )
+    else:
+        logger.warning("Could not find key '%s'", key)
 
     return value_handler(_MISSING) if value_handler is not None else _MISSING
 
 
-def _get_partial(name, partials_dict, partials_path, partials_ext):
+def _get_partial(
+    name, partials_dict, partials_path, partials_ext, logger: _RenderLogger
+):
     """Load a partial"""
     try:
         # Maybe the partial is in the dictionary
-        return partials_dict[name]
+        partial = partials_dict[name]
+        logger.debug("Resolved partial '%s' from configured partials", name)
+        return partial
     except KeyError:
         # Don't try loading from the file system if the partials_path is None or empty
         if partials_path is None or partials_path == "":
+            logger.debug("Partial '%s' was not configured", name)
             return ""
 
         try:
@@ -190,14 +210,18 @@ def _get_partial(name, partials_dict, partials_path, partials_ext):
             base_path = Path(partials_path).resolve(strict=True)
             partial_name = Path(name + path_ext)
             if partial_name.is_absolute() or ".." in partial_name.parts:
+                logger.debug("Rejected partial '%s' outside the configured path", name)
                 return ""
 
             partial_path = (base_path / partial_name).resolve(strict=True)
             partial_path.relative_to(base_path)
             with partial_path.open("r", encoding="utf-8") as partial:
-                return partial.read()
+                content = partial.read()
+            logger.debug("Resolved partial '%s' from the configured path", name)
+            return content
 
         except (OSError, RuntimeError, ValueError):
+            logger.debug("Partial '%s' was unavailable", name)
             return ""
 
 
@@ -208,7 +232,7 @@ class _RenderConfig:
     partials_path: str | Path | None
     partials_ext: str
     partials_dict: Mapping
-    warn: bool
+    logger: _RenderLogger
     default_delimiters: tuple[str, str]
 
 
@@ -254,22 +278,22 @@ class _SourcePolicy(Protocol):
 
 @dataclass
 class _PermissiveSource:
-    warn: bool
+    logger: _RenderLogger
 
     def resolve(
         self, key: str, frame: _RenderFrame, value_handler: Callable[[Any], Any]
     ) -> tuple[Any, bool]:
         return _get_key(
-            key, frame.scopes, warn=self.warn, value_handler=value_handler
+            key, frame.scopes, logger=self.logger, value_handler=value_handler
         ), False
 
 
 class _ExplicitSource:
-    def __init__(self, lambdas: Mapping, warn: bool) -> None:
+    def __init__(self, lambdas: Mapping, logger: _RenderLogger) -> None:
         if not isinstance(lambdas, Mapping):
             raise TypeError("lambdas must be a mapping of template names to callables")
         self.lambdas = dict(lambdas)
-        self.warn = warn
+        self.logger = logger
         for name, definition in self.lambdas.items():
             if not isinstance(name, str):
                 raise TypeError("lambdas mapping keys must be strings")
@@ -280,20 +304,24 @@ class _ExplicitSource:
         self, key: str, frame: _RenderFrame, value_handler: Callable[[Any], Any]
     ) -> tuple[Any, bool]:
         if key in self.lambdas:
+            self.logger.debug(
+                "Resolved template name '%s' from the lambda mapping", key
+            )
             return self.lambdas[key], True
 
         def handle_value(value: Any) -> Any:
             if isinstance(value, Callable):
-                if self.warn:
-                    message = f"Callable template data '{key}' is rejected when lambdas= is supplied"
-                    sys.stderr.write(message + linesep)
+                self.logger.warning(
+                    "Callable template data '%s' is rejected when lambdas= is supplied",
+                    key,
+                )
                 return ""
             return value_handler(value)
 
         return _get_key(
             key,
             frame.scopes,
-            warn=self.warn,
+            logger=self.logger,
             allow_callable_traversal=False,
             value_handler=handle_value,
         ), False
@@ -418,10 +446,9 @@ class ChevronRender:
         )
 
     def empty_result(self, key: str) -> str:
-        if self.config.warn:
-            sys.stderr.write(
-                f"Lambda '{key}' returned None; rendering an empty value{linesep}"
-            )
+        self.config.logger.warning(
+            "Lambda '%s' returned None; rendering an empty value", key
+        )
         return ""
 
     def render_result(self, result: Any, key: str, frame: _RenderFrame) -> str:
@@ -433,7 +460,11 @@ class ChevronRender:
         value, explicit = self.resolve(key, frame)
         if not isinstance(value, Callable):
             return value
-        if _lambda_protocol(value, "interpolation") == _FUNCTION_PROTOCOL:
+        protocol = _lambda_protocol(value, "interpolation")
+        self.config.logger.debug(
+            "Selected %s lambda protocol for '%s'", protocol or "unsupported", key
+        )
+        if protocol == _FUNCTION_PROTOCOL:
             result_frame = _RenderFrame(frame.scopes, self.config.default_delimiters)
             return self.render_result(value(), key, result_frame)
         if explicit or isinstance(value, _LambdaDefinition):
@@ -487,7 +518,11 @@ class ChevronRender:
         value, _ = self.resolve(key, frame)
         if isinstance(value, Callable):
             body = _collect_section(tokens, key, delimiters)
-            handler = self._section_handlers.get(_lambda_protocol(value, "section"))
+            protocol = _lambda_protocol(value, "section")
+            self.config.logger.debug(
+                "Selected %s lambda protocol for '%s'", protocol or "unsupported", key
+            )
+            handler = self._section_handlers.get(protocol)
             result = (
                 handler(self, value, key, body, frame) if handler is not None else ""
             )
@@ -505,7 +540,11 @@ class ChevronRender:
     def render_partial(self, key: str, frame: _RenderFrame, output: str) -> str:
         config = self.config
         partial = _get_partial(
-            key, config.partials_dict, config.partials_path, config.partials_ext
+            key,
+            config.partials_dict,
+            config.partials_path,
+            config.partials_ext,
+            config.logger,
         )
         left = output.rpartition("\n")[2]
         padding = frame.padding + left if left.isspace() else frame.padding
@@ -571,6 +610,9 @@ def render(
     scopes=None,
     warn=False,
     lambdas=None,
+    *,
+    logger=None,
+    log_level=logging.WARNING,
 ):
     """Render a mustache template.
 
@@ -617,7 +659,8 @@ def render(
 
     scopes        -- The list of scopes that get_key will look through
 
-    warn -- Issue a warning to stderr when a template substitution isn't found in the data
+    warn -- Select Chevron's default diagnostic logger using its historic truthiness
+            behaviour. It remains silent by default when no logger is supplied.
 
     lambdas -- Optional mapping defining callable template names. In explicit mode,
                mapped names take precedence over template data. Use chevron.func for
@@ -628,19 +671,56 @@ def render(
                execution. When omitted, callable values reached through template
                context retain compatibility behaviour.
 
+    logger -- Optional `logging.Logger` or `logging.LoggerAdapter` for diagnostics.
+              It replaces Chevron's default logger regardless of warn. Chevron
+              leaves its handlers, levels and propagation under application control.
+
+    log_level -- Lowest numeric standard-library logging level Chevron sends to a
+                 supplied logger. Defaults to `logging.WARNING`.
+
 
     Returns:
 
     A string containing the rendered template.
     """
 
+    if logger is not None and not isinstance(
+        logger, (logging.Logger, logging.LoggerAdapter)
+    ):
+        raise TypeError("logger must be a logging.Logger or logging.LoggerAdapter")
+    if type(log_level) is not int:
+        raise TypeError("log_level must be an integer")
+
+    selected_logger = logger if logger is not None else _DEFAULT_LOGGER
+    selected_log_level = (
+        log_level
+        if logger is not None
+        else logging.WARNING
+        if warn
+        else logging.CRITICAL + 1
+    )
+    diagnostics = _RenderLogger(selected_logger, selected_log_level)
     config = _RenderConfig(
-        partials_path, partials_ext, partials_dict, warn, (def_ldel, def_rdel)
+        partials_path,
+        partials_ext,
+        partials_dict,
+        diagnostics,
+        (def_ldel, def_rdel),
     )
     policy = (
-        _PermissiveSource(warn) if lambdas is None else _ExplicitSource(lambdas, warn)
+        _PermissiveSource(diagnostics)
+        if lambdas is None
+        else _ExplicitSource(lambdas, diagnostics)
     )
     frame = _RenderFrame(
         scopes if scopes is not None else [data], config.default_delimiters, padding
     )
-    return ChevronRender(config, policy).render(template, frame)
+    engine = ChevronRender(config, policy)
+    diagnostics.info("Render started")
+    try:
+        result = engine.render(template, frame)
+    except ChevronError as error:
+        diagnostics.error("Template rendering failed: %s", error)
+        raise
+    diagnostics.info("Render completed successfully")
+    return result

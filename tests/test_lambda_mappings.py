@@ -40,15 +40,15 @@ def test_explicit_mapping_does_not_invoke_an_unregistered_callable() -> None:
 
 @pytest.mark.parametrize("template", ["{{action}}", "{{{action}}}"])
 def test_explicit_mode_rejects_callable_template_data_in_interpolation(
-    template: str, capsys
+    template: str, caplog
 ) -> None:
     def action(text: str, render: object) -> str:
         return "called"
 
     assert chevron.render(template, {"action": action}, lambdas={}, warn=True) == ""
-    assert capsys.readouterr().err == (
-        "Callable template data 'action' is rejected when lambdas= is supplied\n"
-    )
+    assert caplog.messages == [
+        "Callable template data 'action' is rejected when lambdas= is supplied"
+    ]
 
 
 def test_explicit_mode_keeps_non_callable_template_data() -> None:
@@ -427,7 +427,7 @@ def test_explicit_mode_treats_callable_iterable_scope_internals_as_missing() -> 
     )
 
 
-def test_explicit_mode_renders_an_unregistered_callable_as_missing(capsys) -> None:
+def test_explicit_mode_renders_an_unregistered_callable_as_missing(caplog) -> None:
     def callback(text: str, render: object) -> str:
         return "called"
 
@@ -440,10 +440,9 @@ def test_explicit_mode_renders_an_unregistered_callable_as_missing(capsys) -> No
         )
         == ""
     )
-    assert (
-        capsys.readouterr().err
-        == "Callable template data 'callback' is rejected when lambdas= is supplied\n"
-    )
+    assert caplog.messages == [
+        "Callable template data 'callback' is rejected when lambdas= is supplied"
+    ]
     assert (
         chevron.render(
             "{{^callback}}fallback{{/callback}}",
@@ -664,7 +663,7 @@ def test_lambda_mapping_is_snapshotted_for_a_render() -> None:
     )
 
 
-def test_warning_identifies_rejected_callable_template_data(capsys) -> None:
+def test_warning_identifies_rejected_callable_template_data(caplog) -> None:
     def resolved(text: str, render: object) -> str:
         return "resolved"
 
@@ -677,12 +676,12 @@ def test_warning_identifies_rejected_callable_template_data(capsys) -> None:
         )
         == ""
     )
-    assert capsys.readouterr().err == (
-        "Callable template data 'action' is rejected when lambdas= is supplied\n"
-    )
+    assert caplog.messages == [
+        "Callable template data 'action' is rejected when lambdas= is supplied"
+    ]
 
 
-def test_inverted_section_warning_identifies_an_unregistered_callable(capsys) -> None:
+def test_inverted_section_warning_identifies_an_unregistered_callable(caplog) -> None:
     def callback(text: str, render: object) -> str:
         return "called"
 
@@ -695,13 +694,12 @@ def test_inverted_section_warning_identifies_an_unregistered_callable(capsys) ->
         )
         == "fallback"
     )
-    assert (
-        capsys.readouterr().err
-        == "Callable template data 'callback' is rejected when lambdas= is supplied\n"
-    )
+    assert caplog.messages == [
+        "Callable template data 'callback' is rejected when lambdas= is supplied"
+    ]
 
 
-def test_warning_identifies_blocked_callable_traversal(capsys) -> None:
+def test_warning_identifies_blocked_callable_traversal(caplog) -> None:
     class Build:
         version = "0.15.0"
 
@@ -709,10 +707,10 @@ def test_warning_identifies_blocked_callable_traversal(capsys) -> None:
         chevron.render("{{build.version}}", {"build": Build}, lambdas={}, warn=True)
         == ""
     )
-    assert capsys.readouterr().err == (
+    assert caplog.messages == [
         "Could not resolve 'build.version': callable values cannot be traversed "
-        "when lambdas= is supplied\n"
-    )
+        "when lambdas= is supplied"
+    ]
 
 
 def test_library_default_does_not_load_filesystem_partials(
