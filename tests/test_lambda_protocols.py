@@ -254,7 +254,7 @@ def test_compatibility_render_uses_parent_data_for_falsy_temporary_data(
 
 
 @pytest.mark.parametrize("decorator", [chevron.func, chevron.section, chevron.compat])
-def test_lambda_returning_none_renders_empty_and_warns(decorator, capsys) -> None:
+def test_lambda_returning_none_renders_empty_and_warns(decorator, caplog) -> None:
     if decorator is chevron.func:
 
         @decorator
@@ -278,15 +278,12 @@ def test_lambda_returning_none_renders_empty_and_warns(decorator, capsys) -> Non
         template = "{{#value}}body{{/value}}"
 
     assert chevron.render(template, lambdas={"value": value}, warn=True) == ""
-    assert (
-        capsys.readouterr().err
-        == "Lambda 'value' returned None; rendering an empty value\n"
-    )
+    assert caplog.messages == ["Lambda 'value' returned None; rendering an empty value"]
 
 
 @pytest.mark.parametrize("protocol", [chevron.func, chevron.compat])
 def test_compatibility_mode_none_lambda_result_renders_empty_and_warns(
-    protocol, capsys
+    protocol, caplog
 ) -> None:
     if protocol is chevron.func:
 
@@ -304,10 +301,7 @@ def test_compatibility_mode_none_lambda_result_renders_empty_and_warns(
         template = "{{#value}}body{{/value}}"
 
     assert chevron.render(template, {"value": value}, warn=True) == ""
-    assert (
-        capsys.readouterr().err
-        == "Lambda 'value' returned None; rendering an empty value\n"
-    )
+    assert caplog.messages == ["Lambda 'value' returned None; rendering an empty value"]
 
 
 def test_undecorated_registered_lambda_remains_compatibility_protocol() -> None:

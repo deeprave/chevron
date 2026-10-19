@@ -1,7 +1,9 @@
 #!/usr/bin/python
 
-import sys
 from importlib import import_module
+import logging
+import sys
+from typing import Any
 
 from . import __version__
 from .renderer import render
@@ -17,7 +19,7 @@ def main(template, data=None, **kwargs):
         else:
             data = {}
 
-        args = {"template": template_file, "data": data}
+        args: dict[str, Any] = {"template": template_file, "data": data}
 
         args.update(kwargs)
         return render(**args)
@@ -108,11 +110,13 @@ def cli_main():
         "-w",
         "--warn",
         dest="warn",
-        help="Print a warning to stderr for each undefined template key encountered",
+        help="Emit Chevron diagnostics at WARNING level",
         action="store_true",
     )
 
     args = vars(parser.parse_args())
+
+    logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
     try:
         sys.stdout.write(main(**args))

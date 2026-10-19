@@ -2,31 +2,33 @@
 
 ## Context
 
-See proposal.md for motivation. Currently `_get_key`, `_RenderContext.warn_rejected_callable_data` and `_RenderContext.warn_none_lambda_result` write directly to stderr. Their callers use `warn` to suppress output. The tokenizer raises `ChevronError` with line information rather than logging. `cli_main` separately handles syntax exceptions and writes rendered content to stdout.
+See proposal.md for motivation. Currently `_get_key`, `_ExplicitSource` and `ChevronRender.empty_result` write directly to stderr. Their callers use `warn` to suppress output. The tokenizer raises `ChevronError` with line information rather than logging. `cli_main` separately handles syntax exceptions and writes rendered content to stdout.
 
-The renderer simplification and async renderer are proposed, not implemented. This design works with today's `_RenderContext` or the refactor's separated configuration and invocation state; it does not require a second rendering engine.
+The renderer simplification is implemented: `ChevronRender` composes immutable `_RenderConfig`, a per-invocation `_RenderState`, frames and callable-resolution policies. The async renderer remains proposed. This change extends the existing configuration boundary and does not require a second rendering engine.
 
 ## Goals / Non-Goals
 
-Centralise diagnostic routing and filtering, preserve recursive configuration and exception semantics, and make the output boundary reusable by an async engine.
+Centralise diagnostic routing through standard Python logging, preserve recursive configuration and exception semantics, and make the output boundary reusable by an async engine.
 
-Do not configure Python's global logging, add handlers to application loggers, introduce a diagnostic framework or event bus, implement async rendering, change CLI argument parsing, or treat rendered output as logging. Application callback failures and arbitrary application exceptions are not automatically relabelled as template syntax errors.
+Do not configure Python's root logger from the library, add handlers to application loggers, introduce a diagnostic framework or event bus, implement async rendering, or treat rendered output as logging. The CLI configures ordinary process-level logging for its own invocation. Application logging failures and arbitrary application exceptions are not automatically relabelled as template syntax errors.
 
 ## Decisions
 
-### Small callback contract with an explicit gate
+### Native Python logging with application-owned configuration
 
-Extend `render(..., lambdas=None, *, logger=None, log_level=logging.WARNING)`. The callback accepts `(level: int, message: str)` and returns None; `logging.getLogger(...).log` can be passed directly. Use numeric logging levels rather than a Chevron enum or keyword-heavy record protocol. Validate callback callability and integer threshold as public configuration errors before rendering; do not inspect callback signatures. Async callbacks are not supported by the synchronous API.
+Extend `render(..., lambdas=None, *, logger=None)`, where `logger` is a `logging.Logger` or `logging.LoggerAdapter`. Chevron emits diagnostics using native methods and deferred format arguments such as `logger.warning("Could not find key '%s'", key)`. The application owns handlers, filters, propagation and log levels for a supplied logger. Chevron validates the logger type before rendering but does not inspect its configuration or callback signature.
 
-`warn` remains the master switch for every severity. A custom sink and DEBUG threshold cannot bypass `warn=False`. When enabled, the threshold selects messages; the application logger can additionally apply its own filters. This avoids the confusing alternative in which supplying a logger silently enables warnings. The name `warn` is broader than its historical meaning, but renaming or replacing it is unnecessary API churn.
+Chevron uses one shared logger identifier, `chevron`, for its default destination. The library adds no handler, invokes no `basicConfig`, and keeps no module-level active-render configuration, global handler or `ContextVar`. A lightweight per-render adapter carries the selected logger and threshold in `_RenderConfig`; recursive rendering reuses that configuration and independent public renders do not share it.
 
-The default adapter reads the current `sys.stderr` when emitting, writes the message plus the platform newline, and adds no severity prefix to existing warnings. It implements the same callback contract as application sinks. No `basicConfig`, module-level active logger, global handler or ContextVar is needed. Do not construct expensive DEBUG messages or inspect application values when diagnostics are disabled.
+### `warn` retains default-output compatibility
+
+Without a supplied logger, falsey `warn` values remain silent and truthy values select the shared `chevron` logger at `logging.WARNING`. This preserves Chevron's established truthiness behaviour, warning text and newline behaviour. A supplied logger takes precedence over `warn`; its per-render threshold is selected with keyword-only `log_level=`, while the application's handlers, propagation and levels remain its responsibility.
 
 ### Configuration follows the render, not the process
 
-Store the enabled flag, threshold and sink in the per-render configuration reachable from `_RenderContext`. Replace direct output in lookup and lambda result handling with calls through that interface. Keep lookup exception/fallback boundaries unchanged: routing diagnostics is not a reason to move value coercion outside `_get_key`'s compatibility exception handling.
+Store the selected logger adapter in the per-render `_RenderConfig`. Replace direct output in lookup and lambda result handling with standard logging calls. Keep lookup exception/fallback boundaries unchanged, except ensure a logging failure is not caught and treated as an ordinary lookup failure.
 
-Recursive frames, partials and supplied callbacks retain the same diagnostic configuration. A new public `render` call gets its own configuration even when invoked inside a lambda or diagnostic callback. No temporary global overrides or mutable current-frame references. Delivery is synchronous and in rendering order; thread safety of an application sink shared across multiple calls belongs to the application.
+Recursive frames, partials and supplied callbacks retain the same diagnostic configuration. A new public `render` call gets its own configuration even when invoked inside a lambda or logger handler. No temporary global overrides or mutable current-frame references. Delivery is synchronous and in rendering order; thread safety of an application logger shared across multiple calls belongs to the application.
 
 ### Severity and initial event catalogue
 
@@ -37,28 +39,28 @@ Recursive frames, partials and supplied callbacks retain the same diagnostic con
 | INFO | Public render started and successfully completed; no completion event after failure |
 | DEBUG | Name resolution outcome/source, selected lambda protocol, and partial source or missing/rejected outcome |
 
-Keep missing partials' existing empty-result behaviour; DEBUG visibility is not a new WARNING or failure. Debug messages identify tag names and decisions, not scope values, template bodies, returned text, callable reprs or filesystem absolute paths. Escape control characters in new debug identifiers so template-controlled names cannot forge additional lines. Existing warning wording remains unchanged for compatibility. Do not promise secrecy for user-authored exception messages or legacy warning identifiers; document these limits.
+Keep missing partials' existing empty-result behaviour; DEBUG visibility is not a new WARNING or failure. Debug messages identify tag names and decisions, not scope values, template bodies, returned text, callable reprs or filesystem absolute paths. Existing warning wording remains unchanged for compatibility. User-supplied template names and exception messages are passed to the configured logger as existing output did; applications that render untrusted templates remain responsible for their log handling.
 
 ### Report fatal template errors once
 
 The tokenizer remains pure and continues raising its existing exceptions. Catch `ChevronError` at the public rendering boundary, emit one eligible ERROR event, then use bare raise to preserve the original failure. Do not log errors again in recursive frames. A syntax error caught by application lambda code before reaching that boundary is not an unhandled fatal render error. Independent nested public renders have their own reporting boundaries; no global deduplication machinery is introduced.
 
-A normal diagnostic callback failure propagates without a retry or stderr fallback. Do not wrap sink invocation in the template-error catch region: a sink raising `ChevronError` must not recursively trigger itself. If the sink fails while reporting an existing template failure, catch ordinary sink exceptions solely to retain the original template error as primary; do not intercept process-control exceptions. This is a narrow safeguard, not general exception swallowing.
+Chevron relies on Python logging's normal handler and error semantics. It does not wrap a logger exception, retry delivery, report logging failure through itself, or fall back to stderr. This removes bespoke sink-error handling from rendering and keeps error policy with the application logging configuration.
 
 ### CLI and async boundaries
 
-Keep CLI parser errors, exit status and rendered stdout separate from render diagnostics. The existing terminal syntax-error presentation is still the CLI's responsibility. Route CLI calls through a small CLI-specific sink that forwards non-ERROR diagnostics to the default adapter and leaves fatal syntax presentation to its existing exception handler, avoiding duplicate ERROR text when `--warn` is enabled. This is an output adapter, not a tokenizer compatibility wrapper. Direct programmatic `main()` calls continue forwarding renderer options normally.
+Keep CLI parser errors, exit status and rendered stdout separate from render diagnostics. The CLI configures ordinary process-level logging with the historic message-only stderr format, then invokes `render()` normally. `--warn` selects WARNING output; there is no CLI `--log-level` option or CLI-specific diagnostic logger. Direct programmatic `main()` calls continue forwarding renderer options normally.
 
-The async proposal currently describes ordered worker-backed stderr delivery. Its implementation must instead reuse this gate, severity and callback contract, with a default stderr adapter and non-blocking sink delivery. Pure event production must not write output itself; the async engine can drain per-operation events at awaitable boundaries. No async adapter or new dependency is implemented here. Whichever change lands second must preserve the shared contract.
+The async renderer must reuse this Python logging contract. It calls the selected logger directly in message order. Its API documentation will briefly note that a supplied logger runs synchronously and should remain minimal because it blocks that render's execution. Logging is normally inexpensive; applications needing queue-backed logging configure it themselves. Pure event production must not write output itself. No async adapter or new dependency is implemented here. Whichever change lands second must preserve the shared contract.
 
 ## Risks / Trade-offs
 
 - New ERROR reporting with `warn=True` increases library output on malformed templates → document the addition; default `warn=False` remains silent and errors retain their original exception semantics.
-- Callback code can fail or re-enter rendering → isolate configuration, avoid recursive error reporting and test both cases through the public API.
-- Debug instrumentation can cost time or expose data → check the gate before formatting and limit events to names and decisions, without dumping values.
+- Application loggers can filter, re-route or fail while handling events → that is standard logging behaviour and remains application responsibility.
+- Debug instrumentation can cost time or expose data → use deferred logging arguments and limit events to names and decisions, without dumping values.
 - Recursive warning delivery can drift during the engine refactor → parametrise behavioural tests across sections, partials and the supported lambda protocols.
-- Existing CLI syntax presentation could duplicate renderer errors → leave terminal presentation with the CLI handler and filter its renderer ERROR events locally.
+- CLI syntax presentation can appear alongside renderer ERROR output when warnings are enabled → retain the established CLI exit status and simple standard logging configuration rather than introduce CLI-only filtering.
 
 ## Migration Plan
 
-Existing callers need no changes. To integrate application logging, supply `warn=True, logger=app_logger.log`. For debugging, additionally supply `log_level=logging.DEBUG`. Document that `warn=False` suppresses even ERROR delivery but never suppresses exceptions. Explain the synchronous callback contract and preserve all existing positional arguments. No deployment or release process changes are required.
+Existing callers need no changes. To integrate application logging, supply `logger=app_logger`; it replaces Chevron's default destination and its handlers, levels and propagation determine delivery. Use `log_level=logging.DEBUG` to request detailed diagnostics from a supplied logger. Without a logger, a truthy `warn` selects default WARNING output; a falsey value keeps it silent. `warn` never suppresses exceptions or a supplied logger. Preserve all existing positional arguments. No deployment or release process changes are required.

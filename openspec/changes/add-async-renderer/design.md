@@ -2,7 +2,7 @@
 
 ## Context
 
-This design targets the completed `refactor-simplify-renderer` architecture, which is presently proposed rather than implemented. The current renderer calls file-like `read()` through tokenisation, performs `Path.resolve`, file open/read/close in `_get_partial`, and writes warnings directly to stderr. Lambdas, iterable sections and recursive calls all execute synchronously. The refactor supplies a private engine, separate source policies and invocation handlers, common section collection, and explicit configuration/state/frame ownership.
+This design targets the completed `refactor-simplify-renderer` architecture. The current renderer owns file-like template reads, performs `Path.resolve`, file open/read/close in `_get_partial`, and has a composed engine with separate source policies and invocation handlers, common section collection, and explicit configuration/state/frame ownership. Lambdas, iterable sections and recursive calls otherwise execute synchronously.
 
 ## Goals / Non-Goals
 
@@ -47,14 +47,14 @@ Frames used for recursive async calls have independent scope-list containers, sh
 | Native async text reader | Await `read()`; require text and retain caller ownership |
 | Ordinary file-like reader | Run blocking `read()` in an AnyIO worker; await an awaitable result if a regular method returns one |
 | Filesystem partial | Await root/candidate resolution and UTF-8 read through AnyIO, or offload the complete existing contained file operation as one worker call |
-| Missing/rejected/None diagnostics | Produce messages in shared pure logic and await ordered stderr writes through an AnyIO worker |
+| Missing/rejected/None diagnostics | Produce messages in shared pure logic and call the selected synchronous Python logger directly; the default `chevron` logger writes to stderr |
 | Tokenisation and escaping | Shared synchronous CPU work over already-read text |
 
 For reader adaptation, coroutine-method detection is an optimisation: unrecognised synchronous `read` methods are safely invoked in a worker and their result checked for awaitability. Do not pass async readers into the synchronous tokenizer. Read ordinary mapped partial text directly from memory; this change does not expand `partials_dict` into a provider/callback API.
 
 The filesystem adapter retains mapping precedence, `partials_path=None`, suffix handling, relative-name restrictions and resolved containment, including a symlinked configured root. Offloading the complete existing filesystem operation is preferred initially because it preserves one resource ownership boundary and exception behaviour. It does not strengthen the existing path checks against concurrent filesystem replacement.
 
-Synchronous source policies currently emit warnings inline. For async reuse, extract warning production behind a per-operation collector or sink so resolution stays pure; the synchronous engine immediately writes through its sink and the async engine drains through awaited writes at semantic boundaries. Preserve warning text, order and occurrence count. Avoid buffering all warnings until successful completion, which would lose diagnostics on failure.
+Synchronous source policies produce messages through the shared per-render logging contract. For async reuse, keep message production separate from delivery so resolution stays pure; both engines call their selected synchronous logger at the semantic delivery point. This applies to the default stderr logger and application-provided loggers alike. `async_render()` documents that a supplied logger should remain minimal because it executes synchronously and blocks that render while it runs. Preserve warning text, order and occurrence count. Avoid buffering all warnings until successful completion, which would lose diagnostics on failure.
 
 ### Async iteration, checkpoints and cancellation
 
