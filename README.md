@@ -209,7 +209,7 @@ chevron.render(
 )
 ```
 
-With no application logger, `warn=True` selects Chevron's default `logging.WARNING` standard-error behaviour. A supplied logger is independent of `warn`; pass `log_level=logging.INFO` for render start and successful-completion messages, or `log_level=logging.DEBUG` for bounded name resolution, lambda dispatch and partial decisions. Debug messages never include template content, template-data values, callable representations or absolute filesystem paths. Applications should treat template-controlled names and user-authored exception messages as untrusted text.
+By default, `warn=True` enables Chevron's warning-level diagnostics on standard error. Supply a logger to replace that destination; it is independent of `warn`, and `log_level=logging.INFO` enables render start and successful-completion messages while `log_level=logging.DEBUG` also enables bounded name resolution, lambda dispatch and partial decisions. Debug messages never include template content, template-data values, callable representations or absolute filesystem paths. Applications should treat template-controlled names and user-authored exception messages as untrusted text.
 
 Logging runs synchronously in rendering order. A supplied logger should therefore remain minimal; applications needing queue-backed logging can configure that through Python logging.
 

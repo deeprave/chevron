@@ -210,7 +210,10 @@ def _get_partial(
             base_path = Path(partials_path).resolve(strict=True)
             partial_name = Path(name + path_ext)
             if partial_name.is_absolute() or ".." in partial_name.parts:
-                logger.debug("Rejected partial '%s' outside the configured path", name)
+                logger.debug(
+                    "Rejected partial '%s' outside the configured path",
+                    partial_name.name,
+                )
                 return ""
 
             partial_path = (base_path / partial_name).resolve(strict=True)
