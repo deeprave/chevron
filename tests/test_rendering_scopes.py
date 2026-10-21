@@ -1,4 +1,5 @@
 from collections import namedtuple
+from collections.abc import Sequence
 
 import pytest
 
@@ -52,6 +53,71 @@ def test_nested_sections_with_the_same_name_restore_the_outer_scope() -> None:
     )
 
 
+def test_lambda_result_sections_do_not_mutate_the_caller_scopes_container() -> None:
+    scopes: list[dict[str, object]] = [{"item": {"value": "1"}}]
+
+    @chevron.func
+    def outer() -> str:
+        return "{{#item}}{{inner}}{{/item}}"
+
+    @chevron.func
+    def inner() -> str:
+        return str(len(scopes))
+
+    scopes[0].update(outer=outer, inner=inner)
+
+    assert chevron.render("{{outer}}", scopes=scopes) == "1"
+    assert len(scopes) == 1
+
+
+@pytest.mark.parametrize("template", ["literal", "{{missing}}"])
+def test_empty_scopes_are_a_valid_empty_context(template: str) -> None:
+    assert chevron.render(template, scopes=[]) == (
+        "literal" if template == "literal" else ""
+    )
+
+
+@pytest.mark.parametrize("scopes", ["text", b"bytes", {"name": "value"}])
+def test_scopes_reject_non_sequence_containers(scopes: object) -> None:
+    with pytest.raises(TypeError, match="scopes must be a sequence"):
+        chevron.render("{{name}}", scopes=scopes)
+
+
+@pytest.mark.parametrize("tag", ["{{{.}}}", "{{& .}}"])
+def test_unescaped_current_scope_in_inverted_section_uses_the_parent_scope(
+    tag: str,
+) -> None:
+    assert (
+        chevron.render(f"{{{{^missing}}}}{tag}{{{{/missing}}}}", "context") == "context"
+    )
+
+
+@pytest.mark.parametrize("tag", ["{{.}}", "{{{.}}}", "{{& .}}"])
+def test_true_current_scope_is_not_an_inverted_section_marker(tag: str) -> None:
+    assert chevron.render(f"{{{{^missing}}}}{tag}{{{{/missing}}}}", True) == "True"
+
+
+@pytest.mark.parametrize("tag", ["{{.}}", "{{{.}}}", "{{& .}}"])
+def test_nested_inverted_sections_resolve_current_scope(tag: str) -> None:
+    assert (
+        chevron.render(
+            "{{^missing}}{{^other}}" + tag + "{{/other}}{{/missing}}",
+            "context",
+        )
+        == "context"
+    )
+
+
+def test_nested_inverted_sections_resolve_current_scope_sections() -> None:
+    assert (
+        chevron.render(
+            "{{^missing}}{{^other}}{{#.}}{{.}}{{/.}}{{/other}}{{/missing}}",
+            "context",
+        )
+        == "context"
+    )
+
+
 @pytest.mark.parametrize(
     ("name", "expected"),
     [
@@ -65,6 +131,50 @@ def test_dotted_sequence_lookup_resolves_indices_or_renders_empty(
     name: str, expected: str
 ) -> None:
     assert chevron.render("{{%s}}" % name, {"count": [5, 4, 3, 2, 1]}) == expected
+
+
+def test_numeric_lookup_falls_back_past_a_scalar_section_frame() -> None:
+    assert (
+        chevron.render("{{#items}}{{0}}{{/items}}", {"items": [1], "0": "outer value"})
+        == "outer value"
+    )
+
+
+def test_numeric_lookup_falls_back_past_an_inverted_section_marker() -> None:
+    assert (
+        chevron.render("{{^flag}}{{0}}{{/flag}}", {"flag": False, "0": "outer value"})
+        == "outer value"
+    )
+
+
+def test_numeric_lookup_propagates_sequence_index_errors() -> None:
+    class BrokenSequence(Sequence):
+        def __getitem__(self, index: int) -> object:
+            if isinstance(index, str):
+                raise TypeError("string lookup is unsupported")
+            raise TypeError("integer lookup failed")
+
+        def __len__(self) -> int:
+            return 1
+
+    with pytest.raises(TypeError, match="integer lookup failed"):
+        chevron.render("{{0}}", BrokenSequence())
+
+
+def test_sync_render_rejects_async_iterable_sections() -> None:
+    async def values():
+        yield "value"
+
+    with pytest.raises(TypeError, match="use chevron.async_render"):
+        chevron.render("{{#values}}{{.}}{{/values}}", {"values": values()})
+
+
+def test_sync_render_rejects_async_iterable_inverted_sections() -> None:
+    async def values():
+        yield "value"
+
+    with pytest.raises(TypeError, match="use chevron.async_render"):
+        chevron.render("{{^values}}empty{{/values}}", {"values": values()})
 
 
 def test_namedtuple_fields_are_template_values() -> None:

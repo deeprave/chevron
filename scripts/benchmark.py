@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
-from sys import argv
+import asyncio
+from argparse import ArgumentParser
+from time import perf_counter
 from timeit import repeat
 
 import chevron
@@ -16,7 +18,35 @@ def make_test(template=None, data=None, expected=None, **options):
     return test
 
 
-def main(times):
+def make_async_test(template=None, data=None, expected=None, **options):
+    async def test():
+        result = await chevron.async_render(template, data, **options)
+        if result != expected:
+            error = "Test failed:\n-- got --\n{}\n-- expected --\n{}"
+            raise AssertionError(error.format(result, expected))
+
+    return test
+
+
+async def repeat_async(test, number, repeat_count=5):
+    """Time repeated awaited calls inside one event loop."""
+    timings = []
+    for _ in range(repeat_count):
+        started = perf_counter()
+        for _ in range(number):
+            await test()
+        timings.append(perf_counter() - started)
+    return timings
+
+
+async def benchmark_async_workloads(workloads, times):
+    """Benchmark every async workload within one event loop."""
+    for name, workload in workloads.items():
+        timings = await repeat_async(make_async_test(**workload), times)
+        print(f"async {name}: {', '.join(f'{value:.6f}' for value in timings)} seconds")
+
+
+def main(times, mode):
     args = {
         "template": """\
 {{# comments }}
@@ -110,13 +140,24 @@ def main(times):
                 "expected": "world",
             }
 
+    if mode in {"sync", "compare"}:
+        benchmark_sync_workloads(workloads, times)
+    if mode in {"async", "compare"}:
+        asyncio.run(benchmark_async_workloads(workloads, times))
+
+
+def benchmark_sync_workloads(workloads, times):
+    """Benchmark synchronous workloads after validating every output."""
     for name, workload in workloads.items():
         timings = repeat(make_test(**workload), number=times, repeat=5)
-        print(f"{name}: {', '.join(f'{value:.6f}' for value in timings)} seconds")
+        print(f"sync {name}: {', '.join(f'{value:.6f}' for value in timings)} seconds")
 
 
 if __name__ == "__main__":
-    try:
-        main(int(argv[1]))
-    except IndexError:
-        main(10000)
+    parser = ArgumentParser(description="Benchmark validated Chevron workloads")
+    parser.add_argument("times", nargs="?", type=int, default=10000)
+    parser.add_argument(
+        "--mode", choices=("sync", "async", "compare"), default="compare"
+    )
+    options = parser.parse_args()
+    main(options.times, options.mode)

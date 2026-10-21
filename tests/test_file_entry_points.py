@@ -33,6 +33,31 @@ def test_render_reads_from_current_position_and_leaves_reader_open() -> None:
         assert source.read() == ""
 
 
+def test_render_rejects_awaitable_reader_results_without_leaking_coroutines() -> None:
+    class AsyncOnlyTemplate:
+        coroutine = None
+
+        def read(self):
+            async def template() -> str:
+                return "Hello"
+
+            self.coroutine = template()
+            return self.coroutine
+
+    template = AsyncOnlyTemplate()
+    with pytest.raises(TypeError, match="use chevron.async_render"):
+        chevron.render(template)
+
+    assert template.coroutine is not None
+    assert template.coroutine.cr_frame is None
+
+
+@pytest.mark.parametrize("template", [b"Hello", bytearray(b"Hello")])
+def test_render_rejects_binary_template_input(template: object) -> None:
+    with pytest.raises(TypeError, match="templates must be text"):
+        chevron.render(template)
+
+
 @pytest.mark.parametrize("template", [None, 0, False], ids=["none", "zero", "false"])
 def test_render_preserves_falsey_non_text_templates_as_empty(template: object) -> None:
     assert chevron.render(template) == ""
@@ -66,6 +91,25 @@ def test_compatibility_callback_can_render_unhashable_falsey_data_as_empty() -> 
     assert (
         chevron.render("{{#callback}}ignored{{/callback}}", {"callback": callback})
         == ""
+    )
+
+
+def test_compatibility_callback_can_render_an_unhashable_reader() -> None:
+    class Reader:
+        __hash__ = None
+
+        def read(self) -> str:
+            return "{{name}}"
+
+    def callback(text: str, render: Callable[[object], str]) -> str:
+        return render(Reader())
+
+    assert (
+        chevron.render(
+            "{{#callback}}ignored{{/callback}}",
+            {"callback": callback, "name": "reader"},
+        )
+        == "reader"
     )
 
 

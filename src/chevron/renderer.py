@@ -1,6 +1,7 @@
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import AsyncIterable, Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import update_wrapper
+import inspect
 import logging
 from pathlib import Path
 from typing import Any, Protocol
@@ -8,6 +9,8 @@ from typing import Any, Protocol
 from .tokenizer import ChevronError, tokenize as _tokenize
 
 _MISSING = object()
+_INVERTED_SECTION_MARKER = object()
+_SKIPPED_SECTION_MARKER = object()
 _FUNCTION_PROTOCOL = "function"
 _SECTION_PROTOCOL = "section"
 _COMPAT_PROTOCOL = "compat"
@@ -110,6 +113,47 @@ def _normalise_value(key, value):
     return value or ""
 
 
+def _close_awaitable(result: Any) -> None:
+    """Dispose of an awaitable that Chevron cannot consume."""
+    close = getattr(result, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            pass
+
+
+def _reject_awaitable_lambda_result(result: Any, key: str) -> Any:
+    """Keep awaitable lambda results within the asynchronous renderer."""
+    if not inspect.isawaitable(result):
+        return result
+
+    _close_awaitable(result)
+    raise TypeError(
+        f"Lambda '{key}' returned an awaitable; use chevron.async_render instead"
+    )
+
+
+def _read_template_result(result: Any) -> str:
+    """Normalise the established falsey reader results and validate all others."""
+    if not result and not isinstance(result, str):
+        return ""
+    if not isinstance(result, str):
+        raise TypeError("template readers must return text")
+    return result
+
+
+def _read_sync_template(reader: Callable[[], Any]) -> str:
+    """Read synchronous input without allowing an awaitable to escape."""
+    result = reader()
+    if inspect.isawaitable(result):
+        _close_awaitable(result)
+        raise TypeError(
+            "Template reader returned an awaitable; use chevron.async_render instead"
+        )
+    return _read_template_result(result)
+
+
 def _html_escape(string):
     """HTML escape all of these " & < >"""
 
@@ -126,9 +170,16 @@ def _html_escape(string):
     return string
 
 
+def _current_scope(frame):
+    """Return the nearest application scope for current-context lookup."""
+    while frame is not None and frame.scope is _INVERTED_SECTION_MARKER:
+        frame = frame.parent
+    return _MISSING if frame is None else frame.scope
+
+
 def _get_key(
     key,
-    scopes,
+    frame,
     logger: _RenderLogger,
     allow_callable_traversal=True,
     value_handler=None,
@@ -140,12 +191,14 @@ def _get_key(
     # If the key is a dot
     if key == ".":
         # Then just return the current scope
-        scope = scopes[0]
+        scope = _current_scope(frame)
         logger.debug("Resolved current template scope")
         return value_handler(scope) if value_handler is not None else scope
 
     # Loop through the scopes
-    for scope in scopes:
+    current_frame = frame
+    while current_frame is not None:
+        scope = current_frame.scope
         try:
             # For every dot-separated key
             for child in key.split("."):
@@ -165,11 +218,14 @@ def _get_key(
                         scope = provisional_scope
                     except (TypeError, AttributeError):
                         # Try as a list
+                        if not isinstance(scope, Sequence):
+                            raise KeyError(child)
                         scope = scope[int(child)]
 
             value = value_handler(scope) if value_handler is not None else scope
         except (AttributeError, KeyError, IndexError, ValueError):
             # Lookup and value normalisation both preserve fallback behaviour.
+            current_frame = current_frame.parent
             continue
 
         logger.debug("Resolved template name '%s' from template data", key)
@@ -200,32 +256,57 @@ def _get_partial(
         logger.debug("Resolved partial '%s' from configured partials", name)
         return partial
     except KeyError:
-        # Don't try loading from the file system if the partials_path is None or empty
-        if partials_path is None or partials_path == "":
-            logger.debug("Partial '%s' was not configured", name)
+        return _get_filesystem_partial(name, partials_path, partials_ext, logger)
+
+
+def _filesystem_partial_name(name: str, partials_ext: str) -> Path | None:
+    """Return a lexical-safe partial path relative to its configured root."""
+    path_ext = "." + partials_ext if partials_ext else ""
+    partial_name = Path(name + path_ext)
+    if partial_name.is_absolute() or ".." in partial_name.parts:
+        return None
+    return partial_name
+
+
+def _filesystem_partial_rejection_reason(name: str, partials_ext: str) -> str | None:
+    """Return the safe lexical rejection reason for a partial reference."""
+    path_ext = "." + partials_ext if partials_ext else ""
+    partial_name = Path(name + path_ext)
+    if partial_name.is_absolute():
+        return "absolute path"
+    if ".." in partial_name.parts:
+        return "parent traversal"
+    return None
+
+
+def _get_filesystem_partial(name, partials_path, partials_ext, logger: _RenderLogger):
+    """Load a partial from the configured filesystem path."""
+    # Don't try loading from the file system if the partials_path is None or empty
+    if partials_path is None or partials_path == "":
+        logger.debug("Partial '%s' was not configured", name)
+        return ""
+
+    try:
+        base_path = Path(partials_path).resolve(strict=True)
+        partial_name = _filesystem_partial_name(name, partials_ext)
+        if partial_name is None:
+            logger.debug(
+                "Rejected partial reference '%s': %s",
+                name,
+                _filesystem_partial_rejection_reason(name, partials_ext),
+            )
             return ""
 
-        try:
-            path_ext = "." + partials_ext if partials_ext else ""
-            base_path = Path(partials_path).resolve(strict=True)
-            partial_name = Path(name + path_ext)
-            if partial_name.is_absolute() or ".." in partial_name.parts:
-                logger.debug(
-                    "Rejected partial '%s' outside the configured path",
-                    partial_name.name,
-                )
-                return ""
+        partial_path = (base_path / partial_name).resolve(strict=True)
+        partial_path.relative_to(base_path)
+        with partial_path.open("r", encoding="utf-8") as partial:
+            content = partial.read()
+        logger.debug("Resolved partial '%s' from the configured path", name)
+        return content
 
-            partial_path = (base_path / partial_name).resolve(strict=True)
-            partial_path.relative_to(base_path)
-            with partial_path.open("r", encoding="utf-8") as partial:
-                content = partial.read()
-            logger.debug("Resolved partial '%s' from the configured path", name)
-            return content
-
-        except (OSError, RuntimeError, ValueError):
-            logger.debug("Partial '%s' was unavailable", name)
-            return ""
+    except (OSError, RuntimeError, ValueError):
+        logger.debug("Partial '%s' was unavailable", name)
+        return ""
 
 
 @dataclass(frozen=True)
@@ -239,13 +320,59 @@ class _RenderConfig:
     default_delimiters: tuple[str, str]
 
 
-@dataclass
+@dataclass(frozen=True)
 class _RenderFrame:
-    """Scopes, input delimiters and indentation local to a recursive operation."""
+    """One private scope binding and its render context."""
 
-    scopes: list[Any]
+    scope: Any
+    parent: "_RenderFrame | None"
     delimiters: tuple[str, str]
     padding: str = ""
+
+    @classmethod
+    def from_scopes(
+        cls,
+        scopes: Sequence[Any],
+        delimiters: tuple[str, str],
+        padding: str = "",
+    ) -> "_RenderFrame":
+        """Create a private frame chain without mutating the input collection."""
+        if isinstance(scopes, (str, bytes, bytearray)) or not isinstance(
+            scopes, Sequence
+        ):
+            raise TypeError("scopes must be a sequence")
+        values = tuple(scopes)
+        if not values:
+            values = ({},)
+        frame = cls(values[-1], None, delimiters, padding)
+        for scope in reversed(values[:-1]):
+            frame = cls(scope, frame, delimiters, padding)
+        return frame
+
+    def child(
+        self,
+        scope: Any,
+        delimiters: tuple[str, str] | None = None,
+        padding: str | None = None,
+    ) -> "_RenderFrame":
+        """Return a nested scope frame, preserving the current chain."""
+        return _RenderFrame(
+            scope,
+            self,
+            self.delimiters if delimiters is None else delimiters,
+            self.padding if padding is None else padding,
+        )
+
+    def with_context(
+        self, delimiters: tuple[str, str], padding: str | None = None
+    ) -> "_RenderFrame":
+        """Return this scope chain with a recursive render context."""
+        return _RenderFrame(
+            self.scope,
+            self.parent,
+            delimiters,
+            self.padding if padding is None else padding,
+        )
 
 
 @dataclass
@@ -287,7 +414,7 @@ class _PermissiveSource:
         self, key: str, frame: _RenderFrame, value_handler: Callable[[Any], Any]
     ) -> tuple[Any, bool]:
         return _get_key(
-            key, frame.scopes, logger=self.logger, value_handler=value_handler
+            key, frame, logger=self.logger, value_handler=value_handler
         ), False
 
 
@@ -323,11 +450,60 @@ class _ExplicitSource:
 
         return _get_key(
             key,
-            frame.scopes,
+            frame,
             logger=self.logger,
             allow_callable_traversal=False,
             value_handler=handle_value,
         ), False
+
+
+def _prepare_render_context(
+    data: Any,
+    partials_path: str | Path | None,
+    partials_ext: str,
+    partials_dict: Mapping,
+    padding: str,
+    def_ldel: str,
+    def_rdel: str,
+    scopes: Sequence[Any] | None,
+    warn: bool,
+    lambdas: Mapping | None,
+    logger: logging.Logger | logging.LoggerAdapter | None,
+    log_level: int,
+) -> tuple[_RenderConfig, _SourcePolicy, _RenderFrame]:
+    """Build the shared per-render configuration, policy, and root frame."""
+    if logger is not None and not isinstance(
+        logger, (logging.Logger, logging.LoggerAdapter)
+    ):
+        raise TypeError("logger must be a logging.Logger or logging.LoggerAdapter")
+    if type(log_level) is not int:
+        raise TypeError("log_level must be an integer")
+
+    selected_logger = logger if logger is not None else _DEFAULT_LOGGER
+    selected_log_level = (
+        log_level
+        if logger is not None
+        else logging.WARNING
+        if warn
+        else logging.CRITICAL + 1
+    )
+    diagnostics = _RenderLogger(selected_logger, selected_log_level)
+    config = _RenderConfig(
+        partials_path,
+        partials_ext,
+        partials_dict,
+        diagnostics,
+        (def_ldel, def_rdel),
+    )
+    policy = (
+        _PermissiveSource(diagnostics)
+        if lambdas is None
+        else _ExplicitSource(lambdas, diagnostics)
+    )
+    frame = _RenderFrame.from_scopes(
+        scopes if scopes is not None else [data], config.default_delimiters, padding
+    )
+    return config, policy, frame
 
 
 _TAG_SYMBOLS = {
@@ -419,23 +595,23 @@ class ChevronRender:
         self.state = _RenderState()
 
     def render(self, template: Any, frame: _RenderFrame) -> str:
-        """Render source or tokens, restoring frame-local scopes after recursion."""
-        original_scopes = list(frame.scopes)
+        """Render source or tokens using the supplied immutable frame chain."""
         token_stream = None
         try:
+            if isinstance(template, (bytes, bytearray)):
+                raise TypeError("templates must be text")
             if isinstance(template, Sequence) and not isinstance(template, str):
                 tokens = _validated_tokens(template)
             else:
                 reader = getattr(template, "read", None)
                 if reader is not None:
-                    template = reader()
+                    template = _read_sync_template(reader)
                 if not template and not isinstance(template, str):
                     template = ""
                 token_stream = _tokenize(template, *frame.delimiters, include_raw=True)
                 tokens = token_stream
             return self.render_tokens(tokens, frame)
         finally:
-            frame.scopes[:] = original_scopes
             if token_stream is not None:
                 token_stream.close()
 
@@ -455,6 +631,7 @@ class ChevronRender:
         return ""
 
     def render_result(self, result: Any, key: str, frame: _RenderFrame) -> str:
+        result = _reject_awaitable_lambda_result(result, key)
         if result is None:
             return self.empty_result(key)
         return self.render(result if isinstance(result, str) else str(result), frame)
@@ -468,7 +645,7 @@ class ChevronRender:
             "Selected %s lambda protocol for '%s'", protocol or "unsupported", key
         )
         if protocol == _FUNCTION_PROTOCOL:
-            result_frame = _RenderFrame(frame.scopes, self.config.default_delimiters)
+            result_frame = frame.with_context(self.config.default_delimiters, "")
             return self.render_result(value(), key, result_frame)
         if explicit or isinstance(value, _LambdaDefinition):
             return ""
@@ -477,7 +654,7 @@ class ChevronRender:
     def standard_section(
         self, callback: Callable, key: str, body: _SectionBody, frame: _RenderFrame
     ) -> str:
-        result_frame = _RenderFrame(frame.scopes, body.opening, frame.padding)
+        result_frame = frame.with_context(body.opening, frame.padding)
         return self.render_result(callback(body.source()), key, result_frame)
 
     def compatibility_section(
@@ -487,23 +664,20 @@ class ChevronRender:
         self.state.token_cache[text] = tokens
 
         def render_callback(template: Any, data: Any = None) -> str:
-            child = _RenderFrame(
-                [data] + frame.scopes if data else frame.scopes,
-                self.config.default_delimiters,
-                frame.padding,
-            )
+            child = frame.with_context(self.config.default_delimiters, frame.padding)
+            if data:
+                child = child.child(data)
             return self.compatibility_render(template, child)
 
-        result = callback(text, render_callback)
+        result = _reject_awaitable_lambda_result(callback(text, render_callback), key)
         return self.empty_result(key) if result is None else result
 
     def compatibility_render(self, template: Any, frame: _RenderFrame) -> str:
         """Only legacy callbacks replay the invocation's reconstructed tokens."""
         if not template and not isinstance(template, (str, Sequence)):
             template = ""
-        if not (isinstance(template, Sequence) and not isinstance(template, str)):
-            if template in self.state.token_cache:
-                template = self.state.token_cache[template]
+        if isinstance(template, str) and template in self.state.token_cache:
+            template = self.state.token_cache[template]
         return self.render(template, frame)
 
     _section_handlers = {
@@ -517,7 +691,7 @@ class ChevronRender:
         tokens: Iterator,
         frame: _RenderFrame,
         delimiters: tuple[str, str],
-    ) -> tuple[str, tuple[str, str]]:
+    ) -> tuple[str, tuple[str, str], _RenderFrame]:
         value, _ = self.resolve(key, frame)
         if isinstance(value, Callable):
             body = _collect_section(tokens, key, delimiters)
@@ -529,16 +703,20 @@ class ChevronRender:
             result = (
                 handler(self, value, key, body, frame) if handler is not None else ""
             )
-            return result, body.ending
+            return result, body.ending, frame
+        if isinstance(value, AsyncIterable):
+            raise TypeError(
+                f"Section '{key}' resolved to an async iterable; "
+                "use chevron.async_render instead"
+            )
         if isinstance(value, (Sequence, Iterator)) and not isinstance(value, str):
             body = _collect_section(tokens, key, delimiters)
             output = ""
             for item in value:
-                child = _RenderFrame([item] + frame.scopes, body.opening, frame.padding)
+                child = frame.child(item, body.opening, frame.padding)
                 output += self.render(body.tokens, child)
-            return output, body.ending
-        frame.scopes.insert(0, value)
-        return "", delimiters
+            return output, body.ending, frame
+        return "", delimiters, frame.child(value if value else _SKIPPED_SECTION_MARKER)
 
     def render_partial(self, key: str, frame: _RenderFrame, output: str) -> str:
         config = self.config
@@ -551,30 +729,26 @@ class ChevronRender:
         )
         left = output.rpartition("\n")[2]
         padding = frame.padding + left if left.isspace() else frame.padding
-        child = _RenderFrame(frame.scopes, config.default_delimiters, padding)
+        child = frame.with_context(config.default_delimiters, padding)
         result = self.render(partial, child)
         return result.rstrip(" \t") if left.isspace() else result
 
     def render_tokens(self, tokens: Iterator, frame: _RenderFrame) -> str:
         output = ""
-        scopes = frame.scopes
         delimiters = frame.delimiters
         for token in tokens:
             tag, key = token[:2]
-            current_scope = scopes[0]
+            current_scope = frame.scope
             if tag == "end":
-                del scopes[0]
+                if frame.parent is not None:
+                    frame = frame.parent
                 continue
             if tag == "set delimiter":
                 delimiters = _changed_delimiters(key)
                 continue
-            if (
-                not current_scope
-                and not isinstance(current_scope, Callable)
-                and len(scopes) != 1
-            ):
+            if current_scope is _SKIPPED_SECTION_MARKER and frame.parent is not None:
                 if tag in ("section", "inverted section"):
-                    scopes.insert(0, False)
+                    frame = frame.child(_SKIPPED_SECTION_MARKER)
                 continue
 
             match tag:
@@ -582,12 +756,10 @@ class ChevronRender:
                     output += key.replace("\n", "\n" + frame.padding)
                 case "variable" | "no escape":
                     value = self.interpolation(key, frame)
-                    if tag == "variable" and value is True and key == ".":
-                        value = scopes[1]
                     text = value if isinstance(value, str) else str(value)
                     output += _html_escape(text) if tag == "variable" else text
                 case "section":
-                    result, delimiters = self.render_section(
+                    result, delimiters, frame = self.render_section(
                         key, tokens, frame, delimiters
                     )
                     output += result
@@ -595,7 +767,16 @@ class ChevronRender:
                     value, _ = self.policy.resolve(
                         key, frame, lambda value: _normalise_value(key, value)
                     )
-                    scopes.insert(0, not value)
+                    if isinstance(value, AsyncIterable):
+                        raise TypeError(
+                            f"Section '{key}' resolved to an async iterable; "
+                            "use chevron.async_render instead"
+                        )
+                    frame = frame.child(
+                        _INVERTED_SECTION_MARKER
+                        if not value
+                        else _SKIPPED_SECTION_MARKER
+                    )
                 case "partial":
                     output += self.render_partial(key, frame, output)
         return output
@@ -616,7 +797,7 @@ def render(
     *,
     logger=None,
     log_level=logging.WARNING,
-):
+) -> str:
     """Render a mustache template.
 
     Renders a mustache template with a data scope and partial capability.
@@ -687,43 +868,26 @@ def render(
     A string containing the rendered template.
     """
 
-    if logger is not None and not isinstance(
-        logger, (logging.Logger, logging.LoggerAdapter)
-    ):
-        raise TypeError("logger must be a logging.Logger or logging.LoggerAdapter")
-    if type(log_level) is not int:
-        raise TypeError("log_level must be an integer")
-
-    selected_logger = logger if logger is not None else _DEFAULT_LOGGER
-    selected_log_level = (
-        log_level
-        if logger is not None
-        else logging.WARNING
-        if warn
-        else logging.CRITICAL + 1
-    )
-    diagnostics = _RenderLogger(selected_logger, selected_log_level)
-    config = _RenderConfig(
+    config, policy, frame = _prepare_render_context(
+        data,
         partials_path,
         partials_ext,
         partials_dict,
-        diagnostics,
-        (def_ldel, def_rdel),
-    )
-    policy = (
-        _PermissiveSource(diagnostics)
-        if lambdas is None
-        else _ExplicitSource(lambdas, diagnostics)
-    )
-    frame = _RenderFrame(
-        scopes if scopes is not None else [data], config.default_delimiters, padding
+        padding,
+        def_ldel,
+        def_rdel,
+        scopes,
+        warn,
+        lambdas,
+        logger,
+        log_level,
     )
     engine = ChevronRender(config, policy)
-    diagnostics.info("Render started")
+    config.logger.info("Render started")
     try:
         result = engine.render(template, frame)
     except ChevronError as error:
-        diagnostics.error("Template rendering failed: %s", error)
+        config.logger.error("Template rendering failed: %s", error)
         raise
-    diagnostics.info("Render completed successfully")
+    config.logger.info("Render completed successfully")
     return result

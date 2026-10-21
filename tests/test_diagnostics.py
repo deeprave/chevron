@@ -235,6 +235,30 @@ def test_filesystem_partial_debug_outcomes(tmp_path) -> None:
     assert "Partial 'missing' was unavailable" in messages
 
 
+@pytest.mark.parametrize(
+    ("partial", "reason"),
+    [("/etc/passwd", "absolute path"), ("../secret", "parent traversal")],
+)
+def test_rejected_filesystem_partial_diagnostics_retain_safe_context(
+    tmp_path, partial: str, reason: str
+) -> None:
+    logger, handler = _logger("test.rejected-partials")
+
+    assert (
+        chevron.render(
+            "{{> " + partial + "}}",
+            partials_path=tmp_path,
+            logger=logger,
+            log_level=logging.DEBUG,
+        )
+        == ""
+    )
+
+    messages = [message for _, message in _events(handler)]
+    assert f"Rejected partial reference '{partial}': {reason}" in messages
+    assert str(tmp_path) not in "\n".join(messages)
+
+
 def test_nested_operations_retain_the_enclosing_logger(capsys) -> None:
     logger, handler = _logger("test.nested", logging.WARNING)
 

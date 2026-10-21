@@ -1,2 +1,4 @@
 schema: spec-driven
 created: 2026-10-18
+x-tracking:
+  github_issue: 17
