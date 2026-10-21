@@ -1,0 +1,35 @@
+# Spec Delta
+
+## Purpose
+
+Define reliable expansion of finite nested templates independently of the host
+runtime's recursive call-stack depth.
+
+## ADDED Requirements
+
+### Requirement: Finite nested expansion is stack-safe
+
+Chevron SHALL render a finite chain of nested template expansions without
+failing solely because its nesting exceeds the host runtime's recursive
+call-stack depth. This applies to public synchronous and asynchronous renders.
+
+#### Scenario: Deep synchronous partial expansion
+
+- **WHEN** a synchronous render expands a finite chain of nested partials deeper than the host runtime's normal recursion limit
+- **THEN** it returns the same rendered text that the equivalent shallow expansion produces
+
+#### Scenario: Deep asynchronous lambda expansion
+
+- **WHEN** an asynchronous render expands a finite chain of templates returned by supported lambda protocols deeper than the host runtime's normal recursion limit
+- **THEN** it returns the expected rendered text without a recursion-depth failure
+
+### Requirement: Nested expansion preserves rendering context
+
+Chevron SHALL preserve the active scope chain, delimiter context, indentation,
+and configured lambda behaviour as finite nested expansions resume their
+parent template.
+
+#### Scenario: Nested expansion resumes its parent context
+
+- **WHEN** a partial or lambda-produced template completes inside a section that uses nested scopes and delimiter changes
+- **THEN** the remaining parent template renders with the scope, delimiters, indentation, and lambda behaviour established before that nested expansion
