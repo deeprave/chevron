@@ -40,6 +40,52 @@ jobs:
           NO_COLOR: "1"
           TERM: dumb
 
+  async-compatibility:
+    name: Async compatibility (Python ${{ matrix.python-version }}, ${{ matrix.backend }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.11"
+            backend: asyncio
+            packages: anyio==4.14.0
+          - python-version: "3.11"
+            backend: trio
+            packages: anyio==4.14.0 trio==0.32.0
+          - python-version: "3.15"
+            backend: asyncio
+            packages: anyio==4.14.0
+          - python-version: "3.15"
+            backend: trio
+            packages: anyio==4.14.0 trio==0.32.0
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install compatibility dependencies
+        run: |
+          uv sync --frozen --dev --python ${{ matrix.python-version }}
+          uv pip uninstall trio
+          uv pip install ${{ matrix.packages }}
+
+      - name: Run async compatibility tests
+        run: uv run --no-sync pytest tests/async/test_compatibility.py -Werror
+        env:
+          CHEVRON_ANYIO_BACKEND: ${{ matrix.backend }}
+          NO_COLOR: "1"
+          TERM: dumb
+
   quality:
     name: Quality checks
     runs-on: ubuntu-latest

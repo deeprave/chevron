@@ -4,10 +4,27 @@ All notable changes to Chevron are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `async_render()` provides runtime-neutral async rendering for applications using asyncio or Trio. The optional `anyio` or `trio` extra enables it; async lambdas, readers, iterables, and filesystem partials are supported without a library-owned event loop.
+- Added `API.md` with complete synchronous and asynchronous API, lambda, partial, and logging guidance.
+
 ### Changed
 
+- Renderer scope traversal now uses private immutable frames, so sections and
+  nested renders never structurally mutate a caller-provided `scopes` sequence.
 - The internal tokenizer now accepts source text only. Direct callers that supply file-like objects receive a `TypeError`; `chevron.render()` continues to accept file-like templates. Moving input I/O to the renderer boundary prepares the package for async rendering.
 - `chevron.render()` now accepts keyword-only standard-library `logger=` and `log_level=` options for per-render diagnostics. A supplied `logging.Logger` or `logging.LoggerAdapter` remains under application configuration, while `warn` retains its established truthiness-based opt-in behaviour for Chevron's default warning output.
+
+### Fixed
+
+- Rejected filesystem partial diagnostics identify the requested reference and whether it was an absolute path or parent traversal, without disclosing configured or resolved filesystem paths.
+- Inverted-section bookkeeping no longer confuses an application value of
+  `True` with Chevron's internal context state, including current-scope
+  interpolation.
+- Synchronous rendering rejects awaitable template-reader and lambda results
+  with guidance to use `async_render()` rather than leaking unawaited
+  coroutines.
 
 ## [0.15.0] - 2026-10-18
 

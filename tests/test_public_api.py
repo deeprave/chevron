@@ -2,6 +2,7 @@
 
 import sys
 from importlib.metadata import version
+from inspect import signature
 
 import chevron
 import pytest
@@ -11,6 +12,7 @@ def test_public_exports_are_available() -> None:
     assert chevron.__all__ == [
         "main",
         "render",
+        "async_render",
         "cli_main",
         "ChevronError",
         "compat",
@@ -20,6 +22,7 @@ def test_public_exports_are_available() -> None:
     ]
     assert callable(chevron.main)
     assert callable(chevron.render)
+    assert callable(chevron.async_render)
     assert callable(chevron.cli_main)
     assert callable(chevron.compat)
     assert callable(chevron.func)
@@ -30,6 +33,10 @@ def test_public_exports_are_available() -> None:
 
 def test_render_remains_available_from_the_package_root() -> None:
     assert chevron.render("Hello, {{name}}!", {"name": "World"}) == "Hello, World!"
+
+
+def test_async_render_matches_render_configuration() -> None:
+    assert signature(chevron.async_render) == signature(chevron.render)
 
 
 def test_cli_renders_template_without_data_file(tmp_path, monkeypatch, capsys) -> None:

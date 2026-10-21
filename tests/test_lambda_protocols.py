@@ -281,6 +281,37 @@ def test_lambda_returning_none_renders_empty_and_warns(decorator, caplog) -> Non
     assert caplog.messages == ["Lambda 'value' returned None; rendering an empty value"]
 
 
+@pytest.mark.parametrize(
+    ("decorator", "template"),
+    [
+        (chevron.func, "{{value}}"),
+        (chevron.section, "{{#value}}body{{/value}}"),
+        (chevron.compat, "{{#value}}body{{/value}}"),
+    ],
+)
+def test_sync_render_rejects_awaitable_lambda_results(decorator, template: str) -> None:
+    if decorator is chevron.func:
+
+        @decorator
+        async def value() -> str:
+            return "value"
+
+    elif decorator is chevron.section:
+
+        @decorator
+        async def value(body: str) -> str:
+            return body
+
+    else:
+
+        @decorator
+        async def value(body: str, render) -> str:
+            return body
+
+    with pytest.raises(TypeError, match=r"use chevron\.async_render"):
+        chevron.render(template, lambdas={"value": value})
+
+
 @pytest.mark.parametrize("protocol", [chevron.func, chevron.compat])
 def test_compatibility_mode_none_lambda_result_renders_empty_and_warns(
     protocol, caplog

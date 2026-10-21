@@ -18,7 +18,12 @@ Chevron SHALL export `async_render` as an async function returning rendered text
 #### Scenario: Synchronous API remains available
 
 - **WHEN** an application uses `render` without installing async support
-- **THEN** existing synchronous imports, rendering and CLI behaviour remain available
+- **THEN** existing synchronous imports, rendering and CLI behaviour remain available without importing the async renderer or AnyIO
+
+#### Scenario: Optional runtime is absent
+
+- **WHEN** an application awaits `async_render` without installing AnyIO
+- **THEN** it receives an error that directs it to install `chevron-ng[anyio]` or `chevron-ng[trio]`
 
 ### Requirement: Async lambda execution preserves source and protocol rules
 
@@ -53,9 +58,14 @@ The async compatibility protocol SHALL supply an awaitable recursive-render call
 - **WHEN** an invoked callback raises `TypeError` or another application exception
 - **THEN** that exception propagates without trying a different callback signature
 
+#### Scenario: Caller-provided scopes remain structurally unchanged
+
+- **WHEN** a render receives a `scopes` collection and recursively enters sections or lambda results
+- **THEN** Chevron resolves names through private render frames without inserting into, deleting from, or otherwise structurally mutating the caller's collection
+
 ### Requirement: Renderer-owned I/O does not block the async runtime
 
-Async rendering SHALL await template reading, filesystem partial operations and diagnostic writes, directly or through worker adapters. It SHALL preserve partial mapping precedence, opt-in filesystem loading, containment and missing-partial behaviour. Caller-owned readers SHALL remain open; renderer-owned files SHALL be closed on completion or failure.
+Async rendering SHALL await template reading and filesystem partial operations, directly or through worker adapters. It SHALL preserve partial mapping precedence, opt-in filesystem loading, containment and missing-partial behaviour. Diagnostics SHALL use the existing synchronous standard-Python logging contract without an async wrapper or backend-specific logger requirement. Caller-owned readers SHALL remain open; renderer-owned files SHALL be closed on completion or failure.
 
 #### Scenario: Suspended template read
 
@@ -66,6 +76,11 @@ Async rendering SHALL await template reading, filesystem partial operations and 
 
 - **WHEN** the template is an ordinary file-like reader
 - **THEN** Chevron performs its blocking read outside the event-loop thread and leaves that reader open
+
+#### Scenario: Invalid reader result
+
+- **WHEN** an ordinary or native asynchronous reader returns a truthy non-text value
+- **THEN** async rendering raises `TypeError` stating that template readers must return text
 
 #### Scenario: Async partial containment
 
@@ -90,6 +105,12 @@ Async rendering SHALL support asynchronous iterables as section values, awaiting
 
 Cancellation SHALL propagate through async rendering and restore scopes and diagnostic state. Independent renders SHALL not share mutable invocation state. CPU-only rendering SHALL include cooperative checkpoints without promising pre-emption within arbitrary caller code or a single pure parsing operation.
 
+#### Scenario: AnyIO cancellation-scope cleanup
+
+- **WHEN** cancellation is delivered through an AnyIO cancellation scope
+- **THEN** renderer-owned resource cleanup and non-abandoning ordinary-reader operations complete before cancellation is observed
+- **AND** raw asyncio timeout and task-cancellation APIs do not carry that guarantee
+
 #### Scenario: Cancel a suspended lambda
 
 - **WHEN** a render is cancelled while awaiting a lambda
@@ -99,3 +120,33 @@ Cancellation SHALL propagate through async rendering and restore scopes and diag
 
 - **WHEN** two async renders suspend and resume with different scopes, partials and lambda mappings
 - **THEN** neither render observes the other's invocation state
+
+### Requirement: Shared render context preserves synchronous boundaries
+
+Chevron SHALL use private render context for supplied scope sequences in both
+APIs, without structurally mutating the caller's sequence. Internal
+inverted-section bookkeeping SHALL remain distinct from application values.
+Synchronous rendering SHALL reject awaitable reader and lambda results, and
+async iterable section values, with guidance to use `async_render()`.
+
+#### Scenario: True current scope within an inverted section
+
+- **WHEN** an inverted section renders escaped or unescaped current-scope interpolation with `True` as the active application scope
+- **THEN** it renders `True` rather than substituting a parent scope
+
+#### Scenario: Nested inverted sections preserve current scope
+
+- **WHEN** nested inverted sections render current-scope interpolation or a
+  current-scope section
+- **THEN** Chevron resolves the nearest application scope rather than exposing
+  internal inverted-section bookkeeping
+
+#### Scenario: Synchronous awaitable reader
+
+- **WHEN** a synchronous template reader returns an awaitable
+- **THEN** Chevron closes it when possible and raises `TypeError` directing the caller to `async_render()`
+
+#### Scenario: Synchronous async iterable section
+
+- **WHEN** a synchronous section resolves to an async iterable
+- **THEN** Chevron raises `TypeError` directing the caller to `async_render()`
