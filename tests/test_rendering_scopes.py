@@ -1,4 +1,5 @@
 from collections import namedtuple
+from collections.abc import Sequence
 
 import pytest
 
@@ -146,12 +147,34 @@ def test_numeric_lookup_falls_back_past_an_inverted_section_marker() -> None:
     )
 
 
+def test_numeric_lookup_propagates_sequence_index_errors() -> None:
+    class BrokenSequence(Sequence):
+        def __getitem__(self, index: int) -> object:
+            if isinstance(index, str):
+                raise TypeError("string lookup is unsupported")
+            raise TypeError("integer lookup failed")
+
+        def __len__(self) -> int:
+            return 1
+
+    with pytest.raises(TypeError, match="integer lookup failed"):
+        chevron.render("{{0}}", BrokenSequence())
+
+
 def test_sync_render_rejects_async_iterable_sections() -> None:
     async def values():
         yield "value"
 
     with pytest.raises(TypeError, match="use chevron.async_render"):
         chevron.render("{{#values}}{{.}}{{/values}}", {"values": values()})
+
+
+def test_sync_render_rejects_async_iterable_inverted_sections() -> None:
+    async def values():
+        yield "value"
+
+    with pytest.raises(TypeError, match="use chevron.async_render"):
+        chevron.render("{{^values}}empty{{/values}}", {"values": values()})
 
 
 def test_namedtuple_fields_are_template_values() -> None:

@@ -218,10 +218,9 @@ def _get_key(
                         scope = provisional_scope
                     except (TypeError, AttributeError):
                         # Try as a list
-                        try:
-                            scope = scope[int(child)]
-                        except TypeError as error:
-                            raise KeyError(child) from error
+                        if not isinstance(scope, Sequence):
+                            raise KeyError(child)
+                        scope = scope[int(child)]
 
             value = value_handler(scope) if value_handler is not None else scope
         except (AttributeError, KeyError, IndexError, ValueError):
@@ -677,9 +676,8 @@ class ChevronRender:
         """Only legacy callbacks replay the invocation's reconstructed tokens."""
         if not template and not isinstance(template, (str, Sequence)):
             template = ""
-        if not (isinstance(template, Sequence) and not isinstance(template, str)):
-            if template in self.state.token_cache:
-                template = self.state.token_cache[template]
+        if isinstance(template, str) and template in self.state.token_cache:
+            template = self.state.token_cache[template]
         return self.render(template, frame)
 
     _section_handlers = {
@@ -769,6 +767,11 @@ class ChevronRender:
                     value, _ = self.policy.resolve(
                         key, frame, lambda value: _normalise_value(key, value)
                     )
+                    if isinstance(value, AsyncIterable):
+                        raise TypeError(
+                            f"Section '{key}' resolved to an async iterable; "
+                            "use chevron.async_render instead"
+                        )
                     frame = frame.child(
                         _INVERTED_SECTION_MARKER
                         if not value

@@ -94,6 +94,25 @@ def test_compatibility_callback_can_render_unhashable_falsey_data_as_empty() -> 
     )
 
 
+def test_compatibility_callback_can_render_an_unhashable_reader() -> None:
+    class Reader:
+        __hash__ = None
+
+        def read(self) -> str:
+            return "{{name}}"
+
+    def callback(text: str, render: Callable[[object], str]) -> str:
+        return render(Reader())
+
+    assert (
+        chevron.render(
+            "{{#callback}}ignored{{/callback}}",
+            {"callback": callback, "name": "reader"},
+        )
+        == "reader"
+    )
+
+
 @pytest.mark.parametrize("tokens", [("literal",), ("literal", "text", "raw", "extra")])
 def test_render_rejects_malformed_token_tuples(tokens: tuple[str, ...]) -> None:
     with pytest.raises(TypeError, match="two or three values"):

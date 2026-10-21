@@ -74,5 +74,6 @@ Prerequisite: implement `refactor-simplify-renderer`. Use its completed shared c
 ## 11. Address post-review regression findings
 
 - [x] 11.1 Make current-context lookup skip consecutive inverted-section markers in the shared resolver, remove duplicated local recovery, and add nested-inversion sync/async regressions for interpolation and current-context sections.
+- [x] 11.2 Address accepted PR #21 correctness and regression findings: reject async iterables in synchronous inverted sections; preserve eligible sequence indexing errors while retaining scalar fallback; allow compatibility callbacks to render unhashable readers; and strengthen async dispatch and non-blocking filesystem-I/O regressions.
 
 Routine checks, OpenSpec verification, review and delivery remain workflow hygiene outside the implementation checklist.

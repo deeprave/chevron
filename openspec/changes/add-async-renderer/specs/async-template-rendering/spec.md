@@ -127,7 +127,8 @@ Chevron SHALL use private render context for supplied scope sequences in both
 APIs, without structurally mutating the caller's sequence. Internal
 inverted-section bookkeeping SHALL remain distinct from application values.
 Synchronous rendering SHALL reject awaitable reader and lambda results, and
-async iterable section values, with guidance to use `async_render()`.
+async iterable section values, including inverted sections, with guidance to
+use `async_render()`.
 
 #### Scenario: True current scope within an inverted section
 
@@ -149,4 +150,9 @@ async iterable section values, with guidance to use `async_render()`.
 #### Scenario: Synchronous async iterable section
 
 - **WHEN** a synchronous section resolves to an async iterable
+- **THEN** Chevron raises `TypeError` directing the caller to `async_render()`
+
+#### Scenario: Synchronous inverted async iterable section
+
+- **WHEN** a synchronous inverted section resolves to an async iterable
 - **THEN** Chevron raises `TypeError` directing the caller to `async_render()`

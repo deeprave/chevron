@@ -190,9 +190,8 @@ class AsyncChevronRender:
     async def compatibility_render(self, template: Any, frame: _RenderFrame) -> str:
         if not template and not isinstance(template, (str, Sequence)):
             template = ""
-        if not (isinstance(template, Sequence) and not isinstance(template, str)):
-            if template in self.state.token_cache:
-                template = self.state.token_cache[template]
+        if isinstance(template, str) and template in self.state.token_cache:
+            template = self.state.token_cache[template]
         return await self.render(template, frame)
 
     @staticmethod

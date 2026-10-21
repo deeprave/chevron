@@ -2,6 +2,7 @@
 
 from io import StringIO
 import logging
+from collections.abc import Sequence
 
 import pytest
 
@@ -164,6 +165,31 @@ async def test_async_compatibility_callback_keeps_parent_scope_for_falsey_data(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_compatibility_callback_can_render_an_unhashable_reader(
+    anyio_backend: str,
+) -> None:
+    class Reader:
+        __hash__ = None
+
+        def read(self) -> str:
+            return "{{name}}"
+
+    @chevron.compat
+    async def callback(text: str, render) -> str:
+        return await render(Reader())
+
+    assert (
+        await chevron.async_render(
+            "{{#callback}}ignored{{/callback}}",
+            {"name": "reader"},
+            lambdas={"callback": callback},
+        )
+        == "reader"
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
 async def test_synchronous_compatibility_lambda_can_forward_the_awaitable_callback(
     anyio_backend: str,
 ) -> None:
@@ -222,13 +248,18 @@ async def test_async_render_propagates_lambda_errors_without_reinvoking(
 async def test_async_callable_instances_returning_none_render_empty(
     anyio_backend: str,
 ) -> None:
+    calls = 0
+
     class Empty:
         async def __call__(self) -> None:
+            nonlocal calls
+            calls += 1
             return None
 
     value = chevron.func(Empty())
 
     assert await chevron.async_render("{{value}}", lambdas={"value": value}) == ""
+    assert calls == 1
 
 
 @pytest.mark.anyio
@@ -645,15 +676,25 @@ async def test_async_filesystem_partials_reject_symlink_escapes(
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
 async def test_async_filesystem_partial_loading_does_not_block_sibling_tasks(
-    anyio_backend: str, tmp_path
+    anyio_backend: str, monkeypatch, tmp_path
 ) -> None:
     import anyio
     import os
 
+    from chevron import async_renderer
+
     partial_path = tmp_path / "part.mustache"
     os.mkfifo(partial_path)
+    partial_open_requested = anyio.Event()
     sibling_progressed = anyio.Event()
     result: list[str] = []
+    path_open = async_renderer.anyio.Path.open
+
+    async def signalling_open(path, *args, **kwargs):
+        partial_open_requested.set()
+        return await path_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(async_renderer.anyio.Path, "open", signalling_open)
 
     async def render_template() -> None:
         result.append(await chevron.async_render("{{>part}}", partials_path=tmp_path))
@@ -668,12 +709,14 @@ async def test_async_filesystem_partial_loading_does_not_block_sibling_tasks(
         finally:
             await anyio.to_thread.run_sync(os.close, descriptor)
 
-    async with anyio.create_task_group() as tasks:
-        tasks.start_soon(render_template)
-        tasks.start_soon(prove_sibling_progress)
-        await sibling_progressed.wait()
-        assert result == []
-        tasks.start_soon(release_partial)
+    with anyio.fail_after(5):
+        async with anyio.create_task_group() as tasks:
+            tasks.start_soon(render_template)
+            await partial_open_requested.wait()
+            tasks.start_soon(prove_sibling_progress)
+            await sibling_progressed.wait()
+            assert result == []
+            tasks.start_soon(release_partial)
 
     assert result == ["loaded"]
 
@@ -819,6 +862,24 @@ async def test_inverted_async_iterable_is_not_consumed(anyio_backend: str) -> No
         await chevron.async_render("{{^values}}empty{{/values}}", {"values": values()})
         == ""
     )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_numeric_lookup_propagates_sequence_index_errors(
+    anyio_backend: str,
+) -> None:
+    class BrokenSequence(Sequence):
+        def __getitem__(self, index: int) -> object:
+            if isinstance(index, str):
+                raise TypeError("string lookup is unsupported")
+            raise TypeError("integer lookup failed")
+
+        def __len__(self) -> int:
+            return 1
+
+    with pytest.raises(TypeError, match="integer lookup failed"):
+        await chevron.async_render("{{0}}", BrokenSequence())
 
 
 @pytest.mark.anyio
