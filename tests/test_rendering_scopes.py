@@ -134,6 +134,16 @@ def test_dotted_sequence_lookup_resolves_indices_or_renders_empty(
     assert chevron.render("{{%s}}" % name, {"count": [5, 4, 3, 2, 1]}) == expected
 
 
+def test_dotted_lookup_does_not_fall_back_after_its_first_name_resolves() -> None:
+    assert (
+        chevron.render(
+            "{{#a}}{{b.c}}{{/a}}",
+            {"a": {"b": {}}, "b": {"c": "outer value"}},
+        )
+        == ""
+    )
+
+
 def test_numeric_lookup_falls_back_past_a_scalar_section_frame() -> None:
     assert (
         chevron.render("{{#items}}{{0}}{{/items}}", {"items": [1], "0": "outer value"})

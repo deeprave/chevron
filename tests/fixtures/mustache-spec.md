@@ -20,17 +20,17 @@ upstream `HEAD`.
 | --- | ---: | ---: | ---: |
 | comments | 12 | 12 | 0 |
 | delimiters | 14 | 14 | 0 |
-| interpolation | 42 | 41 | 1 |
+| interpolation | 42 | 42 | 0 |
 | inverted | 22 | 22 | 0 |
 | partials | 12 | 12 | 0 |
 | sections | 34 | 34 | 0 |
 | lambdas | 10 | 10 | 0 |
 | dynamic names | 21 | 5 | 16 |
 | inheritance | 27 | 0 | 27 |
-| **Total** | **194** | **150** | **44** |
+| **Total** | **194** | **151** | **43** |
 
-The interpolation failure is `Dotted Names - Context Precedence`. The remaining
-failures are the dynamic-name and inheritance extension cases shown above.
+The remaining failures are the dynamic-name and inheritance extension cases
+shown above.
 
 ## Asynchronous renderer
 
@@ -41,14 +41,14 @@ backends. Each backend has the same result profile as the synchronous renderer.
 | --- | ---: | ---: | ---: | ---: | ---: |
 | comments | 12 | 12 | 0 | 12 | 0 |
 | delimiters | 14 | 14 | 0 | 14 | 0 |
-| interpolation | 42 | 41 | 1 | 41 | 1 |
+| interpolation | 42 | 42 | 0 | 42 | 0 |
 | inverted | 22 | 22 | 0 | 22 | 0 |
 | partials | 12 | 12 | 0 | 12 | 0 |
 | sections | 34 | 34 | 0 | 34 | 0 |
 | lambdas | 10 | 10 | 0 | 10 | 0 |
 | dynamic names | 21 | 5 | 16 | 5 | 16 |
 | inheritance | 27 | 0 | 27 | 0 | 27 |
-| **Total per backend** | **194** | **150** | **44** | **150** | **44** |
+| **Total per backend** | **194** | **151** | **43** | **151** | **43** |
 
 Across the synchronous, asyncio, and Trio executions, the baseline comprises
-582 test executions: 450 pass and 132 fail.
+582 test executions: 453 pass and 129 fail.

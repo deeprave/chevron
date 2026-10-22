@@ -249,9 +249,10 @@ def _get_key(
     current_frame = frame
     while current_frame is not None:
         scope = current_frame.scope
+        index = 0
         try:
             # For every dot-separated key
-            for child in key.split("."):
+            for index, child in enumerate(key.split(".")):
                 if not allow_callable_traversal and isinstance(scope, Callable):
                     blocked_callable_traversal = True
                     raise KeyError("callable values are lookup leaves")
@@ -271,7 +272,13 @@ def _get_key(
                         if not isinstance(scope, Sequence):
                             raise KeyError(child)
                         scope = scope[int(child)]
+        except (AttributeError, KeyError, IndexError, ValueError):
+            if index:
+                break
+            current_frame = current_frame.parent
+            continue
 
+        try:
             value = value_handler(scope) if value_handler is not None else scope
         except (AttributeError, KeyError, IndexError, ValueError):
             # Lookup and value normalisation both preserve fallback behaviour.

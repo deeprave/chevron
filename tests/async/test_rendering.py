@@ -603,6 +603,20 @@ async def test_async_numeric_lookup_falls_back_past_a_scalar_section_frame(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_dotted_lookup_does_not_fall_back_after_its_first_name_resolves(
+    anyio_backend: str,
+) -> None:
+    assert (
+        await chevron.async_render(
+            "{{#a}}{{b.c}}{{/a}}",
+            {"a": {"b": {}}, "b": {"c": "outer value"}},
+        )
+        == ""
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
 async def test_async_numeric_lookup_falls_back_past_an_inverted_section_marker(
     anyio_backend: str,
 ) -> None:
