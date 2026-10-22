@@ -1,5 +1,6 @@
 from collections import namedtuple
 from collections.abc import Sequence
+from typing import overload
 
 import pytest
 
@@ -80,7 +81,7 @@ def test_empty_scopes_are_a_valid_empty_context(template: str) -> None:
 @pytest.mark.parametrize("scopes", ["text", b"bytes", {"name": "value"}])
 def test_scopes_reject_non_sequence_containers(scopes: object) -> None:
     with pytest.raises(TypeError, match="scopes must be a sequence"):
-        chevron.render("{{name}}", scopes=scopes)
+        chevron.render("{{name}}", scopes=scopes)  # ty: ignore[invalid-argument-type]
 
 
 @pytest.mark.parametrize("tag", ["{{{.}}}", "{{& .}}"])
@@ -149,7 +150,13 @@ def test_numeric_lookup_falls_back_past_an_inverted_section_marker() -> None:
 
 def test_numeric_lookup_propagates_sequence_index_errors() -> None:
     class BrokenSequence(Sequence):
-        def __getitem__(self, index: int) -> object:
+        @overload
+        def __getitem__(self, index: int) -> object: ...
+
+        @overload
+        def __getitem__(self, index: slice) -> Sequence[object]: ...
+
+        def __getitem__(self, index: int | slice) -> object | Sequence[object]:
             if isinstance(index, str):
                 raise TypeError("string lookup is unsupported")
             raise TypeError("integer lookup failed")

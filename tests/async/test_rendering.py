@@ -3,6 +3,7 @@
 from io import StringIO
 import logging
 from collections.abc import Sequence
+from typing import overload
 
 import pytest
 
@@ -386,7 +387,7 @@ async def test_async_reader_failures_preserve_the_caller_scope(
     anyio_backend: str,
 ) -> None:
     class BrokenTemplate:
-        async def read(self) -> str:
+        async def read(self) -> None:
             raise OSError("unable to read template")
 
     scopes = [{"name": "intact"}]
@@ -429,7 +430,7 @@ async def test_async_reader_cancellation_leaves_the_reader_owned_by_the_caller(
     class WaitingTemplate:
         closed = False
 
-        async def read(self) -> str:
+        async def read(self) -> None:
             started.set()
             await anyio.sleep_forever()
 
@@ -531,7 +532,7 @@ async def test_async_scopes_reject_non_sequence_containers(
     anyio_backend: str, scopes: object
 ) -> None:
     with pytest.raises(TypeError, match="scopes must be a sequence"):
-        await chevron.async_render("{{name}}", scopes=scopes)
+        await chevron.async_render("{{name}}", scopes=scopes)  # ty: ignore[invalid-argument-type]
 
 
 @pytest.mark.anyio
@@ -739,7 +740,7 @@ async def test_async_filesystem_partial_closes_on_cancellation(
         partial = await path_open(path, *args, **kwargs)
         opened.append(partial)
 
-        async def blocking_read() -> str:
+        async def blocking_read() -> None:
             started.set()
             await anyio.sleep_forever()
 
@@ -770,7 +771,7 @@ async def test_async_render_cancellation_restores_the_caller_scope(
     scopes = [{"value": "intact"}]
 
     @chevron.func
-    async def value() -> str:
+    async def value() -> None:
         started.set()
         await anyio.sleep_forever()
 
@@ -796,7 +797,7 @@ async def test_concurrent_async_renders_keep_scopes_isolated(
     started = 0
     results: list[str] = []
 
-    def make_value() -> object:
+    def make_value():
         @chevron.func
         async def value() -> str:
             nonlocal started
@@ -870,7 +871,13 @@ async def test_async_numeric_lookup_propagates_sequence_index_errors(
     anyio_backend: str,
 ) -> None:
     class BrokenSequence(Sequence):
-        def __getitem__(self, index: int) -> object:
+        @overload
+        def __getitem__(self, index: int) -> object: ...
+
+        @overload
+        def __getitem__(self, index: slice) -> Sequence[object]: ...
+
+        def __getitem__(self, index: int | slice) -> object | Sequence[object]:
             if isinstance(index, str):
                 raise TypeError("string lookup is unsupported")
             raise TypeError("integer lookup failed")
@@ -1021,9 +1028,9 @@ async def test_async_render_warns_through_the_default_logger(
 @pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
 async def test_async_render_validates_logging_arguments(anyio_backend: str) -> None:
     with pytest.raises(TypeError, match="logger must be a logging.Logger"):
-        await chevron.async_render("", logger=object())
+        await chevron.async_render("", logger=object())  # ty: ignore[invalid-argument-type]
     with pytest.raises(TypeError, match="log_level must be an integer"):
-        await chevron.async_render("", log_level="WARNING")
+        await chevron.async_render("", log_level="WARNING")  # ty: ignore[invalid-argument-type]
 
 
 @pytest.mark.anyio

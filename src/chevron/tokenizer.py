@@ -1,4 +1,9 @@
+from collections.abc import Generator
 from dataclasses import dataclass
+from typing import TypeAlias
+
+Token: TypeAlias = tuple[str, str] | tuple[str, str, str]
+RawToken: TypeAlias = tuple[str, str, str]
 
 
 class ChevronError(SyntaxError):
@@ -18,7 +23,9 @@ class _TokenizationState:
 #
 
 
-def grab_literal(template, l_del, state):
+def grab_literal(
+    template: str, l_del: str, state: _TokenizationState
+) -> tuple[str, str]:
     """Parse a literal from the template"""
 
     try:
@@ -33,7 +40,7 @@ def grab_literal(template, l_del, state):
         return (template, "")
 
 
-def l_sa_check(template, literal, is_standalone):
+def l_sa_check(template: str, literal: str, is_standalone: bool | None) -> bool | None:
     """Do a preliminary check to see if a tag could be a standalone"""
 
     # If there is a newline, or the previous tag was a standalone
@@ -49,7 +56,7 @@ def l_sa_check(template, literal, is_standalone):
             return False
 
 
-def r_sa_check(template, tag_type, is_standalone):
+def r_sa_check(template: str, tag_type: str, is_standalone: bool | None) -> bool:
     """Do a final checkto see if a tag could be a standalone"""
 
     # Check right side if we might be a standalone
@@ -67,7 +74,9 @@ def r_sa_check(template, tag_type, is_standalone):
         return False
 
 
-def parse_tag(template, l_del, r_del, state):
+def parse_tag(
+    template: str, l_del: str, r_del: str, state: _TokenizationState
+) -> tuple[tuple[str, str], str]:
     """Parse a tag from a template"""
     tag_types = {
         "!": "comment",
@@ -127,11 +136,11 @@ def parse_tag(template, l_del, r_del, state):
 
 
 def tokenize(
-    template,
-    def_ldel="{{",
-    def_rdel="}}",
-    include_raw=False,
-):
+    template: str,
+    def_ldel: str = "{{",
+    def_rdel: str = "}}",
+    include_raw: bool = False,
+) -> Generator[Token, None, None]:
     """Tokenize a mustache template
 
     Tokenizes template text in a generator fashion without performing I/O.
@@ -189,11 +198,11 @@ def tokenize(
     state = _TokenizationState()
 
     is_standalone = True
-    open_sections = []
+    open_sections: list[str] = []
     l_del = def_ldel
     r_del = def_rdel
 
-    def token(token_type, token_key, raw):
+    def token(token_type: str, token_key: str, raw: str) -> RawToken:
         return (token_type, token_key, raw)
 
     while template:

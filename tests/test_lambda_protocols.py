@@ -19,7 +19,7 @@ def test_tokenize_include_raw_exposes_source_without_changing_default_mode() -> 
 
 def test_tokenize_rejects_file_like_inputs_with_actionable_guidance() -> None:
     with pytest.raises(TypeError, match=r"use chevron\.render\(\) for file-like input"):
-        list(tokenize(StringIO("{{name}}")))
+        list(tokenize(StringIO("{{name}}")))  # ty: ignore[invalid-argument-type]
 
 
 def test_nested_lambda_tokenisation_does_not_leak_syntax_state() -> None:
@@ -362,10 +362,12 @@ def test_undecorated_interpolation_callable_is_not_invoked(explicit: bool) -> No
             return "callable value"
 
     value = Value()
-    options = {"lambdas": {"value": value}} if explicit else {}
-    assert chevron.render("{{value}}", {"value": value}, **options) == (
-        "" if explicit else "callable value"
+    result = (
+        chevron.render("{{value}}", {"value": value}, lambdas={"value": value})
+        if explicit
+        else chevron.render("{{value}}", {"value": value})
     )
+    assert result == ("" if explicit else "callable value")
     assert calls == []
 
 
@@ -403,10 +405,12 @@ def test_incompatible_lambda_tag_does_not_invoke_callable(
         calls.append("called")
         return "unexpected"
 
-    options = {"lambdas": {"value": value}} if explicit else {}
-    assert chevron.render(template, {"value": value}, **options) == (
-        "" if decorator is chevron.func else "|"
+    result = (
+        chevron.render(template, {"value": value}, lambdas={"value": value})
+        if explicit
+        else chevron.render(template, {"value": value})
     )
+    assert result == ("" if decorator is chevron.func else "|")
     assert calls == []
 
 

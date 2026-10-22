@@ -1,11 +1,10 @@
 """AnyIO-backed rendering, loaded only by :func:`chevron.async_render`."""
 
-from collections.abc import AsyncIterable, Callable, Iterator, Sequence
+from collections.abc import AsyncIterable, Callable, Generator, Iterator, Sequence
 import inspect
 import logging
 from pathlib import Path
-from typing import Any
-
+from typing import cast
 import anyio
 
 from .renderer import (
@@ -31,11 +30,20 @@ from .renderer import (
     _prepare_render_context,
     _read_template_result,
     _validated_tokens,
+    LambdaCallback,
+    LambdaRegistry,
+    Logger,
+    PartialMapping,
+    ScopeSequence,
+    TemplateData,
+    TemplateInput,
+    Token,
+    TokenIterator,
 )
 from .tokenizer import ChevronError, tokenize as _tokenize
 
 
-def _read_in_worker(reader: Callable[[], Any]) -> tuple[Any]:
+def _read_in_worker(reader: Callable[[], TemplateData]) -> tuple[TemplateData]:
     """Box a reader result so worker adapters never return an awaitable directly."""
     return (reader(),)
 
@@ -85,10 +93,10 @@ class AsyncChevronRender:
         self.policy = policy
         self.state = _RenderState()
 
-    async def _await_result(self, value: Any) -> Any:
+    async def _await_result(self, value: TemplateData) -> TemplateData:
         return await value if inspect.isawaitable(value) else value
 
-    async def _read_template(self, template: Any) -> Any:
+    async def _read_template(self, template: TemplateInput) -> TemplateInput:
         reader = getattr(template, "read", None)
         if reader is None:
             return template
@@ -108,8 +116,8 @@ class AsyncChevronRender:
                 raise
         return _read_template_result(value)
 
-    async def render(self, template: Any, frame: _RenderFrame) -> str:
-        token_stream = None
+    async def render(self, template: TemplateInput, frame: _RenderFrame) -> str:
+        token_stream: Generator[Token, None, None] | None = None
         try:
             await anyio.lowlevel.checkpoint()
             if isinstance(template, (bytes, bytearray)):
@@ -127,7 +135,7 @@ class AsyncChevronRender:
             if token_stream is not None:
                 token_stream.close()
 
-    def resolve(self, key: str, frame: _RenderFrame) -> tuple[Any, bool]:
+    def resolve(self, key: str, frame: _RenderFrame) -> tuple[TemplateData, bool]:
         return self.policy.resolve(
             key,
             frame,
@@ -142,14 +150,16 @@ class AsyncChevronRender:
         )
         return ""
 
-    async def render_result(self, result: Any, key: str, frame: _RenderFrame) -> str:
+    async def render_result(
+        self, result: TemplateData, key: str, frame: _RenderFrame
+    ) -> str:
         if result is None:
             return self.empty_result(key)
         return await self.render(
             result if isinstance(result, str) else str(result), frame
         )
 
-    async def interpolation(self, key: str, frame: _RenderFrame) -> Any:
+    async def interpolation(self, key: str, frame: _RenderFrame) -> TemplateData:
         value, explicit = self.resolve(key, frame)
         if not isinstance(value, Callable):
             return value
@@ -166,28 +176,40 @@ class AsyncChevronRender:
         return value
 
     async def standard_section(
-        self, callback: Callable, key: str, body: _SectionBody, frame: _RenderFrame
+        self,
+        callback: LambdaCallback,
+        key: str,
+        body: _SectionBody,
+        frame: _RenderFrame,
     ) -> str:
         result_frame = frame.with_context(body.opening, frame.padding)
         result = await self._await_result(callback(body.source()))
         return await self.render_result(result, key, result_frame)
 
     async def compatibility_section(
-        self, callback: Callable, key: str, body: _SectionBody, frame: _RenderFrame
+        self,
+        callback: LambdaCallback,
+        key: str,
+        body: _SectionBody,
+        frame: _RenderFrame,
     ) -> str:
         text, tokens = body.compatibility(frame.delimiters)
         self.state.token_cache[text] = tokens
 
-        async def render_callback(template: Any, data: Any = None) -> str:
+        async def render_callback(
+            template: TemplateInput, data: TemplateData | None = None
+        ) -> str:
             child = frame.with_context(self.config.default_delimiters, frame.padding)
             if data:
                 child = child.child(data)
             return await self.compatibility_render(template, child)
 
         result = await self._await_result(callback(text, render_callback))
-        return self.empty_result(key) if result is None else result
+        return self.empty_result(key) if result is None else cast(str, result)
 
-    async def compatibility_render(self, template: Any, frame: _RenderFrame) -> str:
+    async def compatibility_render(
+        self, template: TemplateInput, frame: _RenderFrame
+    ) -> str:
         if not template and not isinstance(template, (str, Sequence)):
             template = ""
         if isinstance(template, str) and template in self.state.token_cache:
@@ -196,9 +218,9 @@ class AsyncChevronRender:
 
     @staticmethod
     async def collect_section(
-        tokens: Iterator, key: str, delimiters: tuple[str, str]
+        tokens: TokenIterator, key: str, delimiters: tuple[str, str]
     ) -> _SectionBody:
-        body = []
+        body: list[Token] = []
         depth = 0
         ending = delimiters
         for index, token in enumerate(tokens):
@@ -219,7 +241,7 @@ class AsyncChevronRender:
     async def render_section(
         self,
         key: str,
-        tokens: Iterator,
+        tokens: TokenIterator,
         frame: _RenderFrame,
         delimiters: tuple[str, str],
     ) -> tuple[str, tuple[str, str], _RenderFrame]:
@@ -271,7 +293,7 @@ class AsyncChevronRender:
         result = await self.render(partial, child)
         return result.rstrip(" \t") if left.isspace() else result
 
-    async def render_tokens(self, tokens: Iterator, frame: _RenderFrame) -> str:
+    async def render_tokens(self, tokens: TokenIterator, frame: _RenderFrame) -> str:
         output = ""
         delimiters = frame.delimiters
         for index, token in enumerate(tokens):
@@ -318,20 +340,20 @@ class AsyncChevronRender:
 
 
 async def async_render(
-    template="",
-    data={},
-    partials_path=None,
-    partials_ext="mustache",
-    partials_dict={},
-    padding="",
-    def_ldel="{{",
-    def_rdel="}}",
-    scopes=None,
-    warn=False,
-    lambdas=None,
+    template: TemplateInput = "",
+    data: TemplateData = {},
+    partials_path: str | Path | None = None,
+    partials_ext: str = "mustache",
+    partials_dict: PartialMapping = {},
+    padding: str = "",
+    def_ldel: str = "{{",
+    def_rdel: str = "}}",
+    scopes: ScopeSequence | None = None,
+    warn: TemplateData = False,
+    lambdas: LambdaRegistry | None = None,
     *,
-    logger=None,
-    log_level=logging.WARNING,
+    logger: Logger | None = None,
+    log_level: int = logging.WARNING,
 ) -> str:
     """Render a template inside the caller's active AnyIO runtime."""
     config, policy, frame = _prepare_render_context(

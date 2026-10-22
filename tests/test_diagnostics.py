@@ -119,12 +119,12 @@ def test_log_level_enables_lifecycle_and_debug_events() -> None:
 @pytest.mark.parametrize("logger", [object(), logging.getLogger("test").log])
 def test_invalid_logger_fails_before_rendering(logger: object) -> None:
     with pytest.raises(TypeError, match="logger must be a logging.Logger"):
-        chevron.render("{{#unclosed}}", logger=logger)
+        chevron.render("{{#unclosed}}", logger=logger)  # ty: ignore[invalid-argument-type]
 
 
 def test_invalid_log_level_fails_before_rendering() -> None:
     with pytest.raises(TypeError, match="log_level must be an integer"):
-        chevron.render("{{#unclosed}}", log_level="DEBUG")
+        chevron.render("{{#unclosed}}", log_level="DEBUG")  # ty: ignore[invalid-argument-type]
 
 
 def test_logger_adapter_is_supported() -> None:

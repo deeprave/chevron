@@ -71,7 +71,7 @@ async def test_async_rendering_compatibility_contract(
     started = anyio.Event()
 
     @chevron.func
-    async def waiting() -> str:
+    async def waiting() -> None:
         started.set()
         await anyio.sleep_forever()
 

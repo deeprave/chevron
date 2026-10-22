@@ -30,7 +30,7 @@ model.
 - Publishing a PEP 561 `py.typed` marker or promising a consumer-facing typed
   distribution.
 - Removing every `Any`, treating arbitrary template values as a closed schema,
-  or enabling Ty strictness.
+  or applying strict-equivalent annotation checks to the test suite.
 - Changing renderer behaviour, accepted inputs, callback dispatch, or the
   public runtime signature in order to make annotations narrower.
 
@@ -53,33 +53,51 @@ public annotations until every helper is exact would provide neither benefit.
 Add local aliases and small `Protocol` definitions only for repeated stable
 shapes: token tuples/streams, readable template objects, async readable
 objects, rendering callbacks, lambda registries, logger inputs, and scope
-sequences. Use `collections.abc` generic interfaces and modern Python 3.11
-syntax.
+sequences. Define each alias in the module that owns the corresponding runtime
+abstraction; do not add a shared types module. Use `collections.abc` generic
+interfaces and modern Python 3.11 syntax. Use `TYPE_CHECKING` only when an
+annotation-only import would create a runtime dependency or import cycle.
 
-Template values and results of dynamic lookup remain `Any` at the boundary.
-Use `object` when a value is only passed or compared, and narrow it only after
-the implementation has established a concrete type. Do not add an abstraction
-solely to avoid an `Any`, and do not attempt to statically represent every
-legacy lambda calling convention.
+For render contexts, distinguish the caller-facing `ScopeSequence` from the
+immutable `NormalisedScopes` snapshot used internally. `ScopeSequence` remains
+a sequence of dynamic scope values; individual scopes may themselves be
+sequences, mappings, or attribute-bearing objects. `NormalisedScopes` is the
+tuple created after the existing outer-container validation and empty-scope
+normalisation. Do not introduce a wrapper collection: frame construction
+already gives empty input a predictable empty-mapping root and existing lookup
+behaviour handles individual sequence bounds.
 
-### Make test checking a maintained quality target
+Define `TemplateData` as a semantic `Any` alias for template values and dynamic
+lookup results. This preserves the renderer's permissive data boundary while
+making that boundary visible in annotations. Use `object` when a value is only
+passed or compared, and narrow it only after the implementation has established
+a concrete type. Do not add an abstraction solely to avoid an `Any`, and do not
+attempt to statically represent every legacy lambda calling convention.
 
-Change the quality command to check `src` and `tests`, with an explicit
-additional test-module search path matching pytest's `pythonpath` setup. Fix
-the present diagnostics by annotating fixtures, callback parameters, and test
-doubles truthfully. For tests that intentionally exercise an invalid public
-call, use the smallest local suppression or call shape that preserves the
-runtime assertion; do not weaken the production signature.
+### Enforce strict-equivalent source checking and pragmatic test checking
 
-Ty's default diagnostic set remains the policy. The goal is a clean baseline,
-not a strict-mode migration or compulsory annotations for every local variable.
+Apply Ty's documented strict-equivalent rules to `src/` only:
+`dynamic-function-decorator-return`, `missing-type-argument`,
+`possibly-unresolved-reference`, and `unsound-return-statement`. Run Ruff's
+`ANN` and `PYI` rules in preview mode against `src/` as a separate quality
+command. This makes missing source annotations fail validation without imposing
+the same standard on test fixtures.
+
+Check `tests/` with Ty's default diagnostics and an explicit additional
+test-module search path matching pytest's `pythonpath` setup. Fix diagnostics
+by annotating fixtures, callback parameters, and test doubles truthfully. For
+tests that intentionally exercise an invalid public call, use the smallest
+local suppression or call shape that preserves the runtime assertion; do not
+weaken the production signature.
 
 ### Verify annotations through existing quality tooling
 
-Retain the existing Ty development dependency and add the expanded Ty command
-to CI's quality job. Tests continue to validate runtime semantics separately;
-typing tests focus on the maintained checker baseline and representative public
-signature use.
+Retain the existing Ty development dependency and run one Ty command over
+`src/` and `tests/`, with source-only strict-equivalent rules supplied by the
+`src/` override. Add source-only Ruff annotation checks as the separate quality
+command. Tests continue to validate runtime semantics separately; typing tests
+focus on the maintained checker baseline and representative public signature
+use.
 
 ## Risks / Trade-offs
 
@@ -88,16 +106,19 @@ signature use.
   aliases where helpful.
 - Test checking can expose intentionally invalid test calls → use narrow local
   suppressions only at those assertions, never broad file-level ignores.
-- Annotation changes may reveal limitations in Ty's evolving inference → keep
-  the default mode and resolve concrete diagnostics before considering a policy
-  change.
+- Source strict-equivalent checks may reveal limitations in Ty's evolving
+  inference → resolve concrete diagnostics and use a narrow local suppression
+  only when necessary to preserve correct runtime behaviour.
 - Public annotations may be mistaken for a packaged typing guarantee → do not
   add `py.typed` and state that boundary in developer documentation if needed.
 
 ## Migration Plan
 
-1. Add annotations and the expanded Ty command in one change.
-2. Run Ty, tests, formatting, and the normal quality suite.
-3. If an annotation proves incompatible with a supported dynamic input, widen
+1. Annotate the public surface and implementation, then make `src/` pass the
+   strict-equivalent Ty and source-only Ruff annotation checks.
+2. Annotate and correct the test suite until its pragmatic Ty check passes.
+3. Add the source and test commands to the quality workflow, then run tests,
+   formatting, and the normal quality suite.
+4. If an annotation proves incompatible with a supported dynamic input, widen
    that annotation without changing runtime behaviour; reverting is a
    source-only change.

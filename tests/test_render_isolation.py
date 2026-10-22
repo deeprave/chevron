@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
+from typing import Any
 
 import pytest
 
@@ -12,15 +13,16 @@ def test_concurrent_renders_keep_callback_scopes_independent(explicit: bool) -> 
     barrier = Barrier(2)
 
     def render_name(name: str) -> str:
-        def callback(text, render):
+        def callback(text: str, render: Any) -> str:
             barrier.wait(timeout=5)
             return render(text, {"name": name})
 
-        options = {"lambdas": {"callback": callback}} if explicit else {}
-        return chevron.render(
-            "{{#callback}}{{name}}{{/callback}}|{{name}}",
-            {"callback": callback, "name": "outer"},
-            **options,
+        template = "{{#callback}}{{name}}{{/callback}}|{{name}}"
+        data = {"callback": callback, "name": "outer"}
+        return (
+            chevron.render(template, data, lambdas={"callback": callback})
+            if explicit
+            else chevron.render(template, data)
         )
 
     with ThreadPoolExecutor(max_workers=2) as executor:

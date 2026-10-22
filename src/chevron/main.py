@@ -2,30 +2,38 @@
 
 from importlib import import_module
 import logging
+from os import PathLike
 import sys
-from typing import Any
+from typing import TextIO
 
 from . import __version__
-from .renderer import render
+from .renderer import TemplateData, render
 
 
-def main(template, data=None, **kwargs):
+def main(
+    template: str | PathLike[str],
+    data: str | PathLike[str] | None = None,
+    **kwargs: TemplateData,
+) -> str:
     with open(template, "r", encoding="utf-8") as template_file:
         yaml_loader = kwargs.pop("yaml_loader", None) or "SafeLoader"
 
         if data is not None:
             with open(data, "r", encoding="utf-8") as data_file:
-                data = _load_data(data_file, yaml_loader)
+                render_data = _load_data(data_file, yaml_loader)
         else:
-            data = {}
+            render_data: TemplateData = {}
 
-        args: dict[str, Any] = {"template": template_file, "data": data}
+        args: dict[str, TemplateData] = {
+            "template": template_file,
+            "data": render_data,
+        }
 
         args.update(kwargs)
         return render(**args)
 
 
-def _load_data(file, yaml_loader):
+def _load_data(file: TextIO, yaml_loader: str) -> TemplateData:
     try:
         yaml = import_module("yaml")
         loader = getattr(yaml, yaml_loader)  # not tested
@@ -36,18 +44,18 @@ def _load_data(file, yaml_loader):
         return json.load(file)
 
 
-def cli_main():
+def cli_main() -> None:
     """Render mustache templates using json files"""
     import argparse
     import os
 
-    def is_file_or_pipe(arg):
+    def is_file_or_pipe(arg: str) -> str:
         if not os.path.exists(arg) or os.path.isdir(arg):
             parser.error(f"The file {arg} does not exist!")
         else:
             return arg
 
-    def is_dir(arg):
+    def is_dir(arg: str) -> str:
         if not os.path.isdir(arg):
             parser.error(f"The directory {arg} does not exist!")
         else:

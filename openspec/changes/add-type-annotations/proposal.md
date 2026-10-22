@@ -13,14 +13,16 @@ Mustache data is statically knowable.
 - Annotate Chevron's supported public functions, decorators, exceptions, and
   CLI-facing helpers, allowing `Any` at genuinely dynamic template-data
   boundaries until a narrower contract is established.
-- Introduce shared aliases and protocols for stable concepts such as render
+- Introduce local aliases and protocols only for stable concepts such as render
   inputs, token streams, template readers, lambda callbacks, logging, and
-  render scopes; use them where they improve the internal renderer contract.
+  render scopes; define them in their owning modules and use them where they
+  improve the internal renderer contract.
 - Add practical annotations to remaining source and test code, including async
-  fixtures and test doubles, without enabling a strict type-checking mode or
-  redesigning dynamic Mustache resolution for the type checker.
-- Expand the existing Ty quality check from `src/` to `src/` and `tests/`, and
-  make passing that non-strict check part of routine validation.
+  fixtures and test doubles, without redesigning dynamic Mustache resolution
+  for the type checker.
+- Apply Ty's documented strict-equivalent rule set and Ruff's annotation checks
+  to `src/` in the first phase, then annotate and fix the test suite until its
+  pragmatic Ty baseline passes in the second phase.
 - Do not add a `py.typed` marker or change runtime rendering behaviour.
 
 ## Capabilities
