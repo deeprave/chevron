@@ -1,11 +1,13 @@
 # Mustache specification fixtures
 
 These JSON fixtures are copied from the [Mustache specification repository](https://github.com/mustache/spec)
-at revision [`934db98d8ba854574d18aa59a01d2c9aee41944d`](https://github.com/mustache/spec/tree/934db98d8ba854574d18aa59a01d2c9aee41944d).
+at revision [`e8ec001db7f594521e773c34866aca2b5d6b0037`](https://github.com/mustache/spec/tree/e8ec001db7f594521e773c34866aca2b5d6b0037).
 
 They replace the former Git submodule so the Chevron test suite is
-self-contained. The fixture set includes the lambda specification because
-lambdas are a supported Chevron feature.
+self-contained. The fixture set includes lambda, dynamic-name, and inheritance
+modules. The latter two are currently experimental compatibility work and are
+expected to fail until this OpenSpec change is resumed after the iterative
+renderer refactor.
 
 The upstream Mustache specification is MIT licensed. This repository's
 [`LICENSE`](../../../LICENSE) applies to Chevron itself; retain this attribution
