@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import cast
 
 import chevron
 import pytest
@@ -41,7 +42,7 @@ def declare_fixture_lambda(case: dict[str, object], data: object) -> object:
     if not isinstance(data, dict) or not callable(data.get("lambda")):
         return data
 
-    name = case["name"]
+    name = cast(str, case["name"])
     callback = data["lambda"]
     if name.startswith("Interpolation") or name == "Escaping":
         data["lambda"] = chevron.func(callback)

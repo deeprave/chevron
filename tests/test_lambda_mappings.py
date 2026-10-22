@@ -2,12 +2,13 @@ import chevron
 import pytest
 from collections import ChainMap
 from types import MappingProxyType
+from typing import Any
 
 
 def test_explicit_mapping_invokes_the_exact_registered_callable() -> None:
     calls: list[str] = []
 
-    def registered(text: str, render: object) -> str:
+    def registered(text: str, render: Any) -> str:
         calls.append(text)
         return "registered"
 
@@ -58,7 +59,7 @@ def test_explicit_mode_keeps_non_callable_template_data() -> None:
 def test_explicit_mapping_shadows_callable_template_data() -> None:
     calls: list[str] = []
 
-    def registered(text: str, render: object) -> str:
+    def registered(text: str, render: Any) -> str:
         calls.append("registered")
         return "registered"
 
@@ -77,7 +78,7 @@ def test_explicit_mapping_shadows_callable_template_data() -> None:
 
 
 def test_explicit_mapping_supplies_a_section_callable() -> None:
-    def registered(text: str, render: object) -> str:
+    def registered(text: str, render: Any) -> str:
         return "registered"
 
     result = chevron.render(
@@ -90,7 +91,7 @@ def test_explicit_mapping_supplies_a_section_callable() -> None:
 
 
 def test_explicit_mapping_supports_dotted_names_and_partials() -> None:
-    def registered(text: str, render: object) -> str:
+    def registered(text: str, render: Any) -> str:
         return render(text)
 
     result = chevron.render(
@@ -124,7 +125,7 @@ def test_explicit_mapping_requires_the_complete_dotted_name() -> None:
 
 
 def test_explicit_mapping_survives_iterable_section_scopes() -> None:
-    def registered(text: str, render: object) -> str:
+    def registered(text: str, render: Any) -> str:
         return render(text)
 
     result = chevron.render(
@@ -137,7 +138,7 @@ def test_explicit_mapping_survives_iterable_section_scopes() -> None:
 
 
 def test_omitted_lambda_mapping_preserves_legacy_section_callbacks() -> None:
-    def legacy(text: str, render: object) -> str:
+    def legacy(text: str, render: Any) -> str:
         return render(text)
 
     result = chevron.render(
@@ -149,7 +150,7 @@ def test_omitted_lambda_mapping_preserves_legacy_section_callbacks() -> None:
 
 
 def test_legacy_callback_render_accepts_temporary_data() -> None:
-    def legacy(text: str, render: object) -> str:
+    def legacy(text: str, render: Any) -> str:
         return render(text, {"value": "temporary"})
 
     result = chevron.render(
@@ -161,7 +162,7 @@ def test_legacy_callback_render_accepts_temporary_data() -> None:
 
 
 def test_legacy_scope_argument_retains_section_callback_compatibility() -> None:
-    def legacy(text: str, render: object) -> str:
+    def legacy(text: str, render: Any) -> str:
         return render(text)
 
     result = chevron.render(
@@ -263,7 +264,7 @@ def test_legacy_mode_prefers_nested_lookup_over_literal_dotted_key() -> None:
 def test_legacy_callback_preserves_explicit_lambda_restrictions() -> None:
     calls: list[str] = []
 
-    def outer(text: str, render: object) -> str:
+    def outer(text: str, render: Any) -> str:
         calls.append("outer")
         return render(text, {"inner": inner})
 
@@ -302,7 +303,7 @@ def test_legacy_mode_does_not_inspect_unused_custom_mapping() -> None:
 
 def test_public_render_does_not_accept_private_context() -> None:
     with pytest.raises(TypeError):
-        chevron.render("literal", _context=object())
+        chevron.render("literal", _context=object())  # ty: ignore[unknown-argument]
 
 
 def test_legacy_mode_invokes_a_callable_after_an_object_attribute_mapping() -> None:
@@ -516,14 +517,14 @@ def test_explicit_mapping_shadows_a_different_bound_method() -> None:
 )
 def test_explicit_mode_rejects_invalid_lambda_mappings(lambdas: object) -> None:
     with pytest.raises(TypeError, match="lambdas"):
-        chevron.render("literal", lambdas=lambdas)
+        chevron.render("literal", lambdas=lambdas)  # ty: ignore[invalid-argument-type]
 
 
 def test_legacy_callback_can_introduce_a_temporary_callable() -> None:
     def inner(text: str, render: object) -> str:
         return "called"
 
-    def outer(text: str, render: object) -> str:
+    def outer(text: str, render: Any) -> str:
         return render(text, {"inner": inner})
 
     assert (
@@ -643,12 +644,12 @@ def test_explicit_mapping_precedes_scope_precedence() -> None:
 
 
 def test_lambda_mapping_is_snapshotted_for_a_render() -> None:
-    mapping = {}
+    mapping: dict[str, Any] = {}
 
     def inner(text: str, render: object) -> str:
         return "inner"
 
-    def outer(text: str, render: object) -> str:
+    def outer(text: str, render: Any) -> str:
         mapping["inner"] = inner
         return render(text)
 

@@ -113,7 +113,10 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Check types
-        run: uv run ty check src/
+        run: uv run ty check src tests
+
+      - name: Check source annotations
+        run: uv run ruff check src --select ANN,PYI --preview
 
       - name: Check vulnerabilities
         run: uvx --from osvcheck==1.2.0 osvcheck

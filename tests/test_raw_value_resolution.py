@@ -1,4 +1,5 @@
 import pytest
+from typing import Any
 
 import chevron
 
@@ -138,24 +139,24 @@ def test_coercion_errors_fall_back_to_later_scope(value: object) -> None:
 def test_recovered_nested_render_failure_does_not_leak_temporary_scope(
     explicit_lambdas: bool,
 ) -> None:
-    def callback(text: str, render: object) -> str:
+    def callback(text: str, render: Any) -> str:
         try:
             render("{{#temporary}}{{bad}}{{/temporary}}")
         except RuntimeError:
             return render("{{name}}")
         raise AssertionError("nested render should fail")
 
-    options = {"lambdas": {"callback": callback}} if explicit_lambdas else {}
-
-    assert (
+    data = {
+        "callback": callback,
+        "name": "fresh",
+        "temporary": {"name": "stale", "bad": FailingString()},
+    }
+    result = (
         chevron.render(
-            "{{#callback}}body{{/callback}}",
-            {
-                "callback": callback,
-                "name": "fresh",
-                "temporary": {"name": "stale", "bad": FailingString()},
-            },
-            **options,
+            "{{#callback}}body{{/callback}}", data, lambdas={"callback": callback}
         )
-        == "fresh"
+        if explicit_lambdas
+        else chevron.render("{{#callback}}body{{/callback}}", data)
     )
+
+    assert result == "fresh"

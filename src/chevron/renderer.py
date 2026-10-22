@@ -1,10 +1,18 @@
-from collections.abc import AsyncIterable, Callable, Iterator, Mapping, Sequence
+from collections.abc import (
+    AsyncIterable,
+    Callable,
+    Generator,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass, field
 from functools import update_wrapper
 import inspect
 import logging
 from pathlib import Path
-from typing import Any, Protocol
+from types import TracebackType
+from typing import Any, Protocol, TypeAlias, cast
 
 from .tokenizer import ChevronError, tokenize as _tokenize
 
@@ -17,29 +25,69 @@ _COMPAT_PROTOCOL = "compat"
 _LOGGER_NAME = "chevron"
 _DEFAULT_LOGGER = logging.getLogger(_LOGGER_NAME)
 
+TemplateData: TypeAlias = Any
+"""A value exposed to Mustache lookup, intentionally dynamically typed."""
 
-class _RenderLogger(logging.LoggerAdapter):
+Scope: TypeAlias = TemplateData
+ScopeSequence: TypeAlias = Sequence[Scope]
+NormalisedScopes: TypeAlias = tuple[Scope, ...]
+Token: TypeAlias = tuple[str, str] | tuple[str, str, str]
+TokenSequence: TypeAlias = Sequence[Token]
+TokenIterator: TypeAlias = Iterator[Token]
+TemplateInput: TypeAlias = TemplateData
+PartialMapping: TypeAlias = Mapping[str, TemplateInput]
+LambdaCallback: TypeAlias = Callable[..., TemplateData]
+LambdaRegistry: TypeAlias = Mapping[str, LambdaCallback]
+Logger: TypeAlias = logging.Logger | logging.LoggerAdapter[logging.Logger]
+TemplateReader: TypeAlias = Callable[[], TemplateData]
+
+
+class _RenderLogger(logging.LoggerAdapter[Logger]):
     """Apply one render's diagnostic threshold to its selected logger."""
 
-    def __init__(
-        self, logger: logging.Logger | logging.LoggerAdapter, log_level: int
-    ) -> None:
+    def __init__(self, logger: Logger, log_level: int) -> None:
         super().__init__(logger, {})
         self.log_level = log_level
 
-    def log(self, level: int, message: object, *args, **kwargs) -> None:
+    def log(
+        self,
+        level: int,
+        msg: object,
+        *args: object,
+        exc_info: (
+            None
+            | bool
+            | BaseException
+            | tuple[type[BaseException], BaseException, TracebackType | None]
+            | tuple[None, None, None]
+        ) = None,
+        stack_info: bool = False,
+        stacklevel: int = 1,
+        extra: Mapping[str, object] | None = None,
+        **kwargs: object,
+    ) -> None:
         if level >= self.log_level:
-            super().log(level, message, *args, **kwargs)
+            super().log(
+                level,
+                msg,
+                *args,
+                exc_info=exc_info,
+                stack_info=stack_info,
+                stacklevel=stacklevel,
+                extra=extra,
+                **kwargs,
+            )
 
 
 @dataclass
 class _LambdaDefinition:
     """A callable together with its declared template protocol."""
 
-    callback: Callable
+    callback: LambdaCallback
     protocol: str
+    __wrapped__: LambdaCallback = field(init=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         update_wrapper(self, self.callback)
         callback_type = type(self.callback)
         self.__module__ = getattr(self.callback, "__module__", callback_type.__module__)
@@ -50,41 +98,43 @@ class _LambdaDefinition:
         self.__doc__ = getattr(self.callback, "__doc__", callback_type.__doc__)
         self.__annotations__ = getattr(self.callback, "__annotations__", {})
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: TemplateData, **kwargs: TemplateData) -> TemplateData:
         return self.callback(*args, **kwargs)
 
-    def __get__(self, instance, owner):
+    def __get__(
+        self, instance: object, owner: type[object] | None
+    ) -> "_LambdaDefinition":
         descriptor = getattr(self.callback, "__get__", None)
         if descriptor is None:
             return self
         return _LambdaDefinition(descriptor(instance, owner), self.protocol)
 
 
-def _declare_lambda(callback, protocol):
+def _declare_lambda(callback: LambdaCallback, protocol: str) -> _LambdaDefinition:
     if not isinstance(callback, Callable):
         raise TypeError("lambda decorators require a callable")
     return _LambdaDefinition(callback, protocol)
 
 
-def func(callback):
+def func(callback: LambdaCallback) -> _LambdaDefinition:
     """Declare a zero-argument Mustache interpolation lambda."""
 
     return _declare_lambda(callback, _FUNCTION_PROTOCOL)
 
 
-def section(callback):
+def section(callback: LambdaCallback) -> _LambdaDefinition:
     """Declare a one-argument Mustache section lambda."""
 
     return _declare_lambda(callback, _SECTION_PROTOCOL)
 
 
-def compat(callback):
+def compat(callback: LambdaCallback) -> _LambdaDefinition:
     """Declare Chevron's legacy two-argument section-lambda protocol."""
 
     return _declare_lambda(callback, _COMPAT_PROTOCOL)
 
 
-def _lambda_protocol(value, tag):
+def _lambda_protocol(value: TemplateData, tag: str) -> str | None:
     """Resolve a callable's protocol without invoking it."""
 
     if isinstance(value, _LambdaDefinition):
@@ -95,7 +145,7 @@ def _lambda_protocol(value, tag):
     return None
 
 
-def _normalise_value(key, value):
+def _normalise_value(key: str, value: TemplateData) -> TemplateData:
     """Apply Chevron's historic falsey-value rendering behaviour."""
 
     if value is _MISSING:
@@ -113,7 +163,7 @@ def _normalise_value(key, value):
     return value or ""
 
 
-def _close_awaitable(result: Any) -> None:
+def _close_awaitable(result: TemplateData) -> None:
     """Dispose of an awaitable that Chevron cannot consume."""
     close = getattr(result, "close", None)
     if callable(close):
@@ -123,7 +173,7 @@ def _close_awaitable(result: Any) -> None:
             pass
 
 
-def _reject_awaitable_lambda_result(result: Any, key: str) -> Any:
+def _reject_awaitable_lambda_result(result: TemplateData, key: str) -> TemplateData:
     """Keep awaitable lambda results within the asynchronous renderer."""
     if not inspect.isawaitable(result):
         return result
@@ -134,7 +184,7 @@ def _reject_awaitable_lambda_result(result: Any, key: str) -> Any:
     )
 
 
-def _read_template_result(result: Any) -> str:
+def _read_template_result(result: TemplateData) -> str:
     """Normalise the established falsey reader results and validate all others."""
     if not result and not isinstance(result, str):
         return ""
@@ -143,7 +193,7 @@ def _read_template_result(result: Any) -> str:
     return result
 
 
-def _read_sync_template(reader: Callable[[], Any]) -> str:
+def _read_sync_template(reader: TemplateReader) -> str:
     """Read synchronous input without allowing an awaitable to escape."""
     result = reader()
     if inspect.isawaitable(result):
@@ -154,7 +204,7 @@ def _read_sync_template(reader: Callable[[], Any]) -> str:
     return _read_template_result(result)
 
 
-def _html_escape(string):
+def _html_escape(string: str) -> str:
     """HTML escape all of these " & < >"""
 
     html_codes = {
@@ -170,7 +220,7 @@ def _html_escape(string):
     return string
 
 
-def _current_scope(frame):
+def _current_scope(frame: "_RenderFrame | None") -> TemplateData:
     """Return the nearest application scope for current-context lookup."""
     while frame is not None and frame.scope is _INVERTED_SECTION_MARKER:
         frame = frame.parent
@@ -178,12 +228,12 @@ def _current_scope(frame):
 
 
 def _get_key(
-    key,
-    frame,
+    key: str,
+    frame: "_RenderFrame",
     logger: _RenderLogger,
-    allow_callable_traversal=True,
-    value_handler=None,
-):
+    allow_callable_traversal: bool = True,
+    value_handler: Callable[[TemplateData], TemplateData] | None = None,
+) -> TemplateData:
     """Get a key from the current scope."""
 
     blocked_callable_traversal = False
@@ -247,8 +297,12 @@ def _get_key(
 
 
 def _get_partial(
-    name, partials_dict, partials_path, partials_ext, logger: _RenderLogger
-):
+    name: str,
+    partials_dict: PartialMapping,
+    partials_path: str | Path | None,
+    partials_ext: str,
+    logger: _RenderLogger,
+) -> TemplateInput:
     """Load a partial"""
     try:
         # Maybe the partial is in the dictionary
@@ -279,7 +333,12 @@ def _filesystem_partial_rejection_reason(name: str, partials_ext: str) -> str | 
     return None
 
 
-def _get_filesystem_partial(name, partials_path, partials_ext, logger: _RenderLogger):
+def _get_filesystem_partial(
+    name: str,
+    partials_path: str | Path | None,
+    partials_ext: str,
+    logger: _RenderLogger,
+) -> str:
     """Load a partial from the configured filesystem path."""
     # Don't try loading from the file system if the partials_path is None or empty
     if partials_path is None or partials_path == "":
@@ -315,7 +374,7 @@ class _RenderConfig:
 
     partials_path: str | Path | None
     partials_ext: str
-    partials_dict: Mapping
+    partials_dict: PartialMapping
     logger: _RenderLogger
     default_delimiters: tuple[str, str]
 
@@ -324,7 +383,7 @@ class _RenderConfig:
 class _RenderFrame:
     """One private scope binding and its render context."""
 
-    scope: Any
+    scope: Scope
     parent: "_RenderFrame | None"
     delimiters: tuple[str, str]
     padding: str = ""
@@ -332,7 +391,7 @@ class _RenderFrame:
     @classmethod
     def from_scopes(
         cls,
-        scopes: Sequence[Any],
+        scopes: ScopeSequence,
         delimiters: tuple[str, str],
         padding: str = "",
     ) -> "_RenderFrame":
@@ -341,7 +400,7 @@ class _RenderFrame:
             scopes, Sequence
         ):
             raise TypeError("scopes must be a sequence")
-        values = tuple(scopes)
+        values: NormalisedScopes = tuple(scopes)
         if not values:
             values = ({},)
         frame = cls(values[-1], None, delimiters, padding)
@@ -351,7 +410,7 @@ class _RenderFrame:
 
     def child(
         self,
-        scope: Any,
+        scope: Scope,
         delimiters: tuple[str, str] | None = None,
         padding: str | None = None,
     ) -> "_RenderFrame":
@@ -379,10 +438,10 @@ class _RenderFrame:
 class _RenderState:
     """Compatibility token reuse shared by recursive render frames."""
 
-    token_cache: dict[str, list[tuple]] = field(default_factory=dict)
+    token_cache: dict[str, list[Token]] = field(default_factory=dict)
 
 
-def _validated_tokens(tokens: Sequence[tuple]) -> Iterator[tuple]:
+def _validated_tokens(tokens: TokenSequence) -> TokenIterator:
     """Yield direct token input after enforcing Chevron's public token shapes."""
 
     for token in tokens:
@@ -400,8 +459,8 @@ class _SourcePolicy(Protocol):
         self,
         key: str,
         frame: _RenderFrame,
-        value_handler: Callable[[Any], Any],
-    ) -> tuple[Any, bool]:
+        value_handler: Callable[[TemplateData], TemplateData],
+    ) -> tuple[TemplateData, bool]:
         """Return the value and whether it came from the explicit mapping."""
         ...
 
@@ -411,15 +470,18 @@ class _PermissiveSource:
     logger: _RenderLogger
 
     def resolve(
-        self, key: str, frame: _RenderFrame, value_handler: Callable[[Any], Any]
-    ) -> tuple[Any, bool]:
+        self,
+        key: str,
+        frame: _RenderFrame,
+        value_handler: Callable[[TemplateData], TemplateData],
+    ) -> tuple[TemplateData, bool]:
         return _get_key(
             key, frame, logger=self.logger, value_handler=value_handler
         ), False
 
 
 class _ExplicitSource:
-    def __init__(self, lambdas: Mapping, logger: _RenderLogger) -> None:
+    def __init__(self, lambdas: LambdaRegistry, logger: _RenderLogger) -> None:
         if not isinstance(lambdas, Mapping):
             raise TypeError("lambdas must be a mapping of template names to callables")
         self.lambdas = dict(lambdas)
@@ -431,15 +493,18 @@ class _ExplicitSource:
                 raise TypeError("lambdas mapping values must be callable")
 
     def resolve(
-        self, key: str, frame: _RenderFrame, value_handler: Callable[[Any], Any]
-    ) -> tuple[Any, bool]:
+        self,
+        key: str,
+        frame: _RenderFrame,
+        value_handler: Callable[[TemplateData], TemplateData],
+    ) -> tuple[TemplateData, bool]:
         if key in self.lambdas:
             self.logger.debug(
                 "Resolved template name '%s' from the lambda mapping", key
             )
             return self.lambdas[key], True
 
-        def handle_value(value: Any) -> Any:
+        def handle_value(value: TemplateData) -> TemplateData:
             if isinstance(value, Callable):
                 self.logger.warning(
                     "Callable template data '%s' is rejected when lambdas= is supplied",
@@ -458,17 +523,17 @@ class _ExplicitSource:
 
 
 def _prepare_render_context(
-    data: Any,
+    data: TemplateData,
     partials_path: str | Path | None,
     partials_ext: str,
-    partials_dict: Mapping,
+    partials_dict: PartialMapping,
     padding: str,
     def_ldel: str,
     def_rdel: str,
-    scopes: Sequence[Any] | None,
-    warn: bool,
-    lambdas: Mapping | None,
-    logger: logging.Logger | logging.LoggerAdapter | None,
+    scopes: ScopeSequence | None,
+    warn: TemplateData,
+    lambdas: LambdaRegistry | None,
+    logger: Logger | None,
     log_level: int,
 ) -> tuple[_RenderConfig, _SourcePolicy, _RenderFrame]:
     """Build the shared per-render configuration, policy, and root frame."""
@@ -526,7 +591,7 @@ def _changed_delimiters(key: str) -> tuple[str, str]:
 class _SectionBody:
     """Collected tokens with lexical delimiter boundaries, not a parsed AST."""
 
-    tokens: list[tuple]
+    tokens: list[Token]
     opening: tuple[str, str]
     ending: tuple[str, str]
 
@@ -548,10 +613,10 @@ class _SectionBody:
                 left, right = _changed_delimiters(key)
         return "".join(parts)
 
-    def compatibility(self, delimiters: tuple[str, str]) -> tuple[str, list[tuple]]:
+    def compatibility(self, delimiters: tuple[str, str]) -> tuple[str, list[Token]]:
         left, right = delimiters
         parts = []
-        tokens = []
+        tokens: list[Token] = []
         for token in self.tokens:
             tag, key = token[:2]
             if tag == "comment" or (tag == "literal" and key == ""):
@@ -567,9 +632,9 @@ class _SectionBody:
 
 
 def _collect_section(
-    tokens: Iterator, key: str, delimiters: tuple[str, str]
+    tokens: TokenIterator, key: str, delimiters: tuple[str, str]
 ) -> _SectionBody:
-    body = []
+    body: list[Token] = []
     depth = 0
     ending = delimiters
     for token in tokens:
@@ -594,9 +659,9 @@ class ChevronRender:
         self.policy = policy
         self.state = _RenderState()
 
-    def render(self, template: Any, frame: _RenderFrame) -> str:
+    def render(self, template: TemplateInput, frame: _RenderFrame) -> str:
         """Render source or tokens using the supplied immutable frame chain."""
-        token_stream = None
+        token_stream: Generator[Token, None, None] | None = None
         try:
             if isinstance(template, (bytes, bytearray)):
                 raise TypeError("templates must be text")
@@ -615,7 +680,7 @@ class ChevronRender:
             if token_stream is not None:
                 token_stream.close()
 
-    def resolve(self, key: str, frame: _RenderFrame) -> tuple[Any, bool]:
+    def resolve(self, key: str, frame: _RenderFrame) -> tuple[TemplateData, bool]:
         return self.policy.resolve(
             key,
             frame,
@@ -630,13 +695,13 @@ class ChevronRender:
         )
         return ""
 
-    def render_result(self, result: Any, key: str, frame: _RenderFrame) -> str:
+    def render_result(self, result: TemplateData, key: str, frame: _RenderFrame) -> str:
         result = _reject_awaitable_lambda_result(result, key)
         if result is None:
             return self.empty_result(key)
         return self.render(result if isinstance(result, str) else str(result), frame)
 
-    def interpolation(self, key: str, frame: _RenderFrame) -> Any:
+    def interpolation(self, key: str, frame: _RenderFrame) -> TemplateData:
         value, explicit = self.resolve(key, frame)
         if not isinstance(value, Callable):
             return value
@@ -652,27 +717,37 @@ class ChevronRender:
         return value
 
     def standard_section(
-        self, callback: Callable, key: str, body: _SectionBody, frame: _RenderFrame
+        self,
+        callback: LambdaCallback,
+        key: str,
+        body: _SectionBody,
+        frame: _RenderFrame,
     ) -> str:
         result_frame = frame.with_context(body.opening, frame.padding)
         return self.render_result(callback(body.source()), key, result_frame)
 
     def compatibility_section(
-        self, callback: Callable, key: str, body: _SectionBody, frame: _RenderFrame
+        self,
+        callback: LambdaCallback,
+        key: str,
+        body: _SectionBody,
+        frame: _RenderFrame,
     ) -> str:
         text, tokens = body.compatibility(frame.delimiters)
         self.state.token_cache[text] = tokens
 
-        def render_callback(template: Any, data: Any = None) -> str:
+        def render_callback(
+            template: TemplateInput, data: TemplateData | None = None
+        ) -> str:
             child = frame.with_context(self.config.default_delimiters, frame.padding)
             if data:
                 child = child.child(data)
             return self.compatibility_render(template, child)
 
         result = _reject_awaitable_lambda_result(callback(text, render_callback), key)
-        return self.empty_result(key) if result is None else result
+        return self.empty_result(key) if result is None else cast(str, result)
 
-    def compatibility_render(self, template: Any, frame: _RenderFrame) -> str:
+    def compatibility_render(self, template: TemplateInput, frame: _RenderFrame) -> str:
         """Only legacy callbacks replay the invocation's reconstructed tokens."""
         if not template and not isinstance(template, (str, Sequence)):
             template = ""
@@ -688,7 +763,7 @@ class ChevronRender:
     def render_section(
         self,
         key: str,
-        tokens: Iterator,
+        tokens: TokenIterator,
         frame: _RenderFrame,
         delimiters: tuple[str, str],
     ) -> tuple[str, tuple[str, str], _RenderFrame]:
@@ -733,7 +808,7 @@ class ChevronRender:
         result = self.render(partial, child)
         return result.rstrip(" \t") if left.isspace() else result
 
-    def render_tokens(self, tokens: Iterator, frame: _RenderFrame) -> str:
+    def render_tokens(self, tokens: TokenIterator, frame: _RenderFrame) -> str:
         output = ""
         delimiters = frame.delimiters
         for token in tokens:
@@ -783,20 +858,20 @@ class ChevronRender:
 
 
 def render(
-    template="",
-    data={},
-    partials_path=None,
-    partials_ext="mustache",
-    partials_dict={},
-    padding="",
-    def_ldel="{{",
-    def_rdel="}}",
-    scopes=None,
-    warn=False,
-    lambdas=None,
+    template: TemplateInput = "",
+    data: TemplateData = {},
+    partials_path: str | Path | None = None,
+    partials_ext: str = "mustache",
+    partials_dict: PartialMapping = {},
+    padding: str = "",
+    def_ldel: str = "{{",
+    def_rdel: str = "}}",
+    scopes: ScopeSequence | None = None,
+    warn: TemplateData = False,
+    lambdas: LambdaRegistry | None = None,
     *,
-    logger=None,
-    log_level=logging.WARNING,
+    logger: Logger | None = None,
+    log_level: int = logging.WARNING,
 ) -> str:
     """Render a mustache template.
 
