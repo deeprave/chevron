@@ -4,7 +4,34 @@
 
 See `proposal.md` for the motivation. Chevron currently vendors seven JSON modules from Mustache revision `934db98` and executes every JSON file it finds. The current upstream revision is `e8ec001db7f594521e773c34866aca2b5d6b0037`; it contains the seven existing modules plus optional `~dynamic-names.json` and `~inheritance.json`.
 
-Running the current renderer against that full upstream set produces 150 passes and 44 failures. The only core failure is dotted-name context precedence. The remaining failures belong to the two newly added optional modules, which introduce dynamic partial names and template inheritance. Those modules are part of this change's implementation scope.
+The initial experimental step refreshes the fixtures and runs the complete
+conformance group against the current renderer. Its recorded per-module result
+is the implementation map; it replaces any earlier aggregate count. The map
+will identify the core dotted-name defect and the dynamic-name/inheritance
+requirements that must constrain the iterative-renderer refactor.
+
+## Experimental Baseline
+
+On 2026-10-22, upstream `mustache/spec` HEAD resolved to
+`e8ec001db7f594521e773c34866aca2b5d6b0037`. All nine JSON modules were
+copied into the uncommitted worktree and verified byte-for-byte against that
+revision. The `conformance` marker selects both synchronous and asynchronous
+fixture executions.
+
+Each renderer mode has the same 194-case result: 150 passing and 44 failing.
+The asynchronous test runs once under asyncio and once under Trio, producing
+the combined 582-case baseline of 450 passing and 132 failing executions.
+
+| Module | Passing per mode | Failing per mode |
+| --- | ---: | ---: |
+| `comments`, `delimiters`, `inverted`, `partials`, `sections`, `~lambdas` | 104 | 0 |
+| `interpolation` | 41 | 1 |
+| `~dynamic-names` | 5 | 16 |
+| `~inheritance` | 0 | 27 |
+
+The interpolation failure is `Dotted Names - Context Precedence`. The dynamic
+and inheritance failures cover their current upstream extension requirements;
+this map is input to, not an exception from, the eventual all-passing gate.
 
 ## Goals / Non-Goals
 
@@ -34,6 +61,31 @@ Keep fixture discovery comprehensive: every vendored JSON module is enabled and 
 
 Excluding dynamic names and inheritance would create a baseline of known failures rather than a standards update. Vendoring the complete suite and implementing all its modules keeps the fixture set an honest release gate.
 
+### Establish a separately runnable conformance group before implementation
+
+Mark both synchronous and asynchronous tests that execute vendored upstream
+fixtures with pytest's `conformance` marker. This provides a bounded command
+for the initial baseline and for later compatibility verification without
+mixing it with Chevron-owned behavioural tests.
+
+### Map compatibility first, then suspend for the iterative renderer refactor
+
+Refresh and execute the full fixture set before changing renderer behaviour.
+Record the upstream pin and per-module outcomes as the compatibility map, then
+pause this change without committing the experimental fixture refresh. Complete
+`refactor-iterative-renderer` first, using that map to ensure its frame and
+control-flow design can accommodate the required current-Mustache behaviour.
+Resume this change only after the refactor is ready for the implementation work.
+
+### Defer public API shape until implementation is understood
+
+Dynamic partial names and inheritance should initially reuse the established
+rendering and partial-lookup contracts. Do not decide that this is a permanent
+public-API constraint before the implementation shape is known. If a new
+argument becomes necessary, make it keyword-only, preserve existing callers
+where possible, and retain compatibility mode when direct preservation is not
+possible.
+
 ### Preserve dotted-name scope after the first component resolves
 
 Adjust lookup so that outer-scope search applies only while resolving the first component of a dotted name. Once that component is found, resolve each remaining component exclusively against the preceding value. A failed later component therefore produces an unresolved value rather than restarting the whole dotted chain in an outer scope.
@@ -59,7 +111,8 @@ The vendor suite remains a black-box conformance signal through the public rende
 
 ## Migration Plan
 
-1. Replace fixture files and update provenance documentation in one reviewable change.
-2. Update the harness classification and dotted-name lookup with regression coverage.
-3. Run the enabled conformance suite and full repository checks.
-4. Roll back by restoring the prior vendored revision and lookup behaviour if the update reveals an unintended compatibility regression.
+1. Pin the current upstream head, refresh the fixture worktree, and record the complete conformance baseline without committing it.
+2. Use the mapped failures to shape and complete `refactor-iterative-renderer`; suspend this change while that refactor is underway.
+3. Resume this change, review and commit the vendor refresh, then update the harness classification and dotted-name lookup with regression coverage.
+4. Implement dynamic-name and inheritance behaviour, then run the conformance group and full repository checks.
+5. Roll back by restoring the prior vendored revision and lookup behaviour if the update reveals an unintended compatibility regression.

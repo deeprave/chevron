@@ -57,6 +57,21 @@ This retains the accepted render-scoped ownership model. Copying scopes or
 building a second mutable scope stack would obscure that ownership without
 solving the execution problem.
 
+### Accommodate the mapped current-Mustache extension requirements
+
+The `update-to-latest-mustache` experimental baseline establishes three
+constraints for active work: dotted lookup must retain its first-resolved
+scope; dynamic partial names must enter the existing partial-lookup path after
+context resolution; and inheritance needs nested parent work with render-local
+named-block override state, indentation, and recursion preserved.
+
+The refactor does not implement those tokens or behaviours. It must, however,
+keep child-work continuations and renderer-local state explicit enough that the
+later change can attach an immutable block-override mapping to parent work
+without restoring recursive rendering or broadening public APIs. This is a
+concrete near-term constraint from the measured fixture set, not a speculative
+extension point.
+
 ### Keep two small drivers, with only narrow shared helpers
 
 The synchronous driver processes work directly. The AnyIO driver uses the same
@@ -108,6 +123,9 @@ benchmark results inform review but are not pass/fail timing gates.
 - [A caller recursively invokes its own compatibility callback] → Preserve its
   existing contract while documenting that the stack-safety guarantee covers
   engine-owned finite expansion, not recursion created by caller code.
+- [The iterative state cannot carry inheritance-local overrides] → Review the
+  measured current-Mustache compatibility map before finalising active-work
+  records, while leaving extension syntax implementation to its own change.
 
 ## Migration Plan
 

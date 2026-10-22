@@ -11,6 +11,9 @@ from specification_fixtures import (
 )
 
 
+pytestmark = pytest.mark.conformance
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize("case", fixture_cases())
 async def test_async_mustache_specification_case(case: dict[str, object]) -> None:

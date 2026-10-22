@@ -1,5 +1,9 @@
 # Tasks
 
+## 0. Current-Mustache compatibility constraints
+
+- [ ] 0.1 Review the recorded `update-to-latest-mustache` compatibility map before finalising active-work records; verify the state design preserves first-resolved dotted scope, existing partial lookup for dynamic names, and renderer-local inheritance override context without adding extension syntax or public API.
+
 ## 1. Synchronous iterative rendering
 
 - [ ] 1.1 Define the private active-work and completion-continuation state that pairs immutable `_RenderFrame` context with token iteration, output chunks, delimiter state, and deterministic token-stream cleanup; verify focused unit tests cover frame ownership and child completion.

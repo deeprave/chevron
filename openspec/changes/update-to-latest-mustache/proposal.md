@@ -9,7 +9,10 @@ Updating the vendor set makes the current standard's expectations visible and pr
 ## What Changes
 
 - Replace the vendored JSON fixtures with the complete current upstream JSON set pinned to `e8ec001db7f594521e773c34866aca2b5d6b0037`, retaining Chevron's attribution README.
-- Update the conformance harness so every vendored current upstream JSON module is a passing compatibility test.
+- Mark every synchronous and asynchronous upstream-fixture test as `conformance`, so the full compatibility suite can run separately from other tests.
+- Refresh the fixtures and measure a per-module baseline before renderer implementation begins; use that map to identify the requirements the iterative-renderer refactor must support.
+- Temporarily shelve implementation of this change after the baseline is mapped, then complete the iterative-renderer refactor with those requirements as design input.
+- Resume this change after that refactor and update the conformance harness so every vendored current upstream JSON module is a passing compatibility test.
 - Correct dotted-name resolution so that, after the initial name resolves in a scope, later dotted segments resolve only from that value rather than falling back to an outer scope.
 - Implement the upstream dynamic-name and inheritance modules, including their partial lookup, block override, scope, recursion, standalone whitespace, and indentation behaviours.
 - Document the pinned upstream revision and implemented Mustache module support.
@@ -28,3 +31,15 @@ Updating the vendor set makes the current standard's expectations visible and pr
 ## Impact
 
 Affected areas include `tests/fixtures/mustache-spec/`, `tests/test_specifications.py`, renderer name resolution, and the fixture attribution documentation. There is no public API addition. The core dotted-name correction changes an incorrect outer-scope fallback to match the Mustache specification.
+
+## Delivery Approach
+
+This begins as an experimental compatibility-mapping change. The first stage
+pins the upstream head, refreshes the vendor files, and captures the complete
+`conformance`-marked baseline. It deliberately does not commit the refreshed
+fixtures or begin renderer implementation yet.
+
+Once the failure map is understood, this change is shelved while
+`refactor-iterative-renderer` is completed with the mapped Mustache requirements
+as design constraints. The conformance change then resumes to implement the
+remaining behaviour and commit the reviewed vendor refresh.

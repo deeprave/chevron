@@ -17,6 +17,9 @@ engines can make nested work explicit instead.
   parent render correctly.
 - Preserve existing public APIs and observable Mustache, compatibility-lambda,
   partial, delimiter, diagnostic, and cancellation behaviour.
+- Shape the internal active-work state around the mapped requirements for
+  current Mustache dynamic partial names and template inheritance, without
+  implementing those extension syntaxes in this refactor.
 - Add regression coverage for finite deep expansion and compare equivalent
   synchronous and asynchronous rendering workloads while developing the
   refactor.
