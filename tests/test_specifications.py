@@ -11,6 +11,9 @@ from specification_fixtures import (
 )
 
 
+pytestmark = pytest.mark.conformance
+
+
 @pytest.mark.parametrize("case", fixture_cases())
 def test_mustache_specification_case(case: dict[str, object]) -> None:
     namespace: dict[str, object] = {}

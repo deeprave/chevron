@@ -65,6 +65,9 @@ addopts = [
     "--cov=chevron",
     "--cov-report=term-missing",
 ]
+markers = [
+    "conformance: vendored upstream Mustache specification compatibility tests",
+]
 
 [tool.coverage.run]
 branch = true
