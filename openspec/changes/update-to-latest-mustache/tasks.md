@@ -7,25 +7,25 @@
 - [x] 0.3 Run the complete `conformance` group against the refreshed fixtures and record a per-module pass/fail baseline, including the exact upstream commit, as the compatibility map.
 - [x] 0.4 Suspend this change without committing the experimental fixture refresh. Use the compatibility map to shape `refactor-iterative-renderer`, then resume this change after that refactor is ready for the required Mustache behaviours.
 
-## 1. Commit the reviewed specification baseline after the renderer refactor
+## 1. Commit the reviewed specification baseline for ongoing evaluation
 
-- [ ] 1.1 Reconfirm the upstream pin selected during the experimental baseline, commit every reviewed JSON fixture from that revision into `tests/fixtures/mustache-spec/`, including `~dynamic-names.json` and `~inheritance.json`, and verify their checksums match upstream.
-- [ ] 1.2 Update the fixture attribution README with the immutable revision, upstream URL, licence attribution, and the current optional-module support status; verify the recorded revision resolves upstream.
+- [x] 1.1 Reconfirm the upstream pin selected during the experimental baseline, commit every reviewed JSON fixture from that revision into `tests/fixtures/mustache-spec/`, including `~dynamic-names.json` and `~inheritance.json`, and verify their checksums match upstream.
+- [x] 1.2 Update the fixture attribution README with the immutable revision, upstream URL, licence attribution, and the current optional-module support status; verify the recorded revision resolves upstream.
 
 ## 2. Enable the complete conformance suite
 
-- [ ] 2.1 Update the fixture harness so every vendored upstream JSON module, including dynamic names and inheritance, is enabled; verify the parametrised cases cover all nine modules.
+- [x] 2.1 Update the fixture harness so every vendored upstream JSON module, including dynamic names and inheritance, is enabled; verify the parametrised cases cover all nine modules.
 - [ ] 2.2 Keep the harness adapter limited to upstream JSON tagged-lambda materialisation and add behaviour-focused coverage for complete fixture discovery; verify no vendored module is silently excluded and the `conformance` group remains complete.
 
 ## 3. Correct core dotted-name resolution
 
-- [ ] 3.1 Change dotted-name lookup so only its first component searches active scopes and later components remain within the resolved value; verify the upstream context-precedence fixture passes.
-- [ ] 3.2 Add Chevron-owned regression coverage for outer-scope fallback rejection and successful nested dotted lookup; verify the tests exercise the public render API.
+- [x] 3.1 Change dotted-name lookup so only its first component searches active scopes and later components remain within the resolved value; verify the upstream context-precedence fixture passes.
+- [x] 3.2 Add Chevron-owned regression coverage for outer-scope fallback rejection and successful nested dotted lookup; verify the tests exercise the public render API.
 
 ## 4. Implement dynamic partial names
 
-- [ ] 4.1 Extend tokenisation and rendering to resolve `{{>*name}}` tags through the active context before ordinary partial lookup; verify every dynamic-name fixture passes, including dotted resolution, recursion, whitespace, and indentation cases.
-- [ ] 4.2 Add Chevron-owned public-API regression tests for dynamic-partial resolution and missing values; verify configured partial mappings and existing filesystem partial safeguards remain intact.
+- [x] 4.1 Extend tokenisation and rendering to resolve `{{>*name}}` tags through the active context before ordinary partial lookup; verify every dynamic-name fixture passes, including dotted resolution, recursion, whitespace, and indentation cases.
+- [x] 4.2 Add Chevron-owned public-API regression tests for dynamic-partial resolution and missing values; verify configured partial mappings and existing filesystem partial safeguards remain intact.
 
 ## 5. Implement template inheritance
 

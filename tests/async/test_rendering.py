@@ -12,6 +12,14 @@ from async_support import ANYIO_BACKENDS
 from chevron import ChevronError
 
 
+class TruthinessError:
+    def __eq__(self, other: object) -> bool:
+        return False
+
+    def __bool__(self) -> bool:
+        raise ValueError("truthiness failed")
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
 async def test_async_render_renders_text_on_supported_backends(
@@ -501,6 +509,143 @@ async def test_async_render_keeps_mapping_partial_precedence_and_containment(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_dynamic_partial_keeps_the_current_section_scope(
+    anyio_backend: str,
+) -> None:
+    assert (
+        await chevron.async_render(
+            "{{#items}}[{{>*presentation.name}}]{{/items}}",
+            {
+                "presentation": {"name": "item"},
+                "items": ["first", "second"],
+            },
+            partials_dict={"item": "{{.}}"},
+        )
+        == "[first][second]"
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_missing_or_nested_dynamic_partial_names_render_empty(
+    anyio_backend: str,
+) -> None:
+    assert (
+        await chevron.async_render("{{>*missing}}", partials_dict={"missing": "wrong"})
+        == ""
+    )
+    assert await chevron.async_render("{{>*}}", partials_dict={"*": "wrong"}) == ""
+    assert (
+        await chevron.async_render(
+            "{{>**template}}",
+            {"template": "name", "name": "content"},
+            partials_dict={"**template": "wrong", "content": "wrong"},
+        )
+        == ""
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_dynamic_partial_keeps_mapping_precedence_and_filesystem_containment(
+    anyio_backend: str, tmp_path
+) -> None:
+    (tmp_path / "choice.mustache").write_text("filesystem", encoding="utf-8")
+    (tmp_path.parent / "outside.mustache").write_text("outside", encoding="utf-8")
+
+    assert (
+        await chevron.async_render(
+            "{{>*selector}}",
+            {"selector": "choice"},
+            partials_path=tmp_path,
+            partials_dict={"choice": "mapping"},
+        )
+        == "mapping"
+    )
+    assert (
+        await chevron.async_render(
+            "{{>*selector}}",
+            {"selector": "../outside"},
+            partials_path=tmp_path,
+        )
+        == ""
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_dynamic_partial_respects_explicit_lambda_policy(
+    anyio_backend: str,
+) -> None:
+    called = False
+
+    def selector() -> str:
+        nonlocal called
+        called = True
+        return "choice"
+
+    assert (
+        await chevron.async_render(
+            "{{>*selector}}",
+            {"selector": "choice"},
+            partials_dict={"choice": "wrong"},
+            lambdas={"selector": selector},
+        )
+        == ""
+    )
+    assert not called
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_dynamic_partial_debug_messages_do_not_disclose_selector_data(
+    anyio_backend: str, tmp_path
+) -> None:
+    messages: list[str] = []
+
+    class Handler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            messages.append(record.getMessage())
+
+    logger = logging.Logger("test.async-dynamic-partial", logging.DEBUG)
+    logger.addHandler(Handler())
+
+    assert (
+        await chevron.async_render(
+            "{{>*selector_secret}}{{>*}}{{>**selector_secret}}{{>*number_secret}}{{>*path_secret}}",
+            {
+                "selector_secret": "selected-by-data",
+                "number_secret": 42,
+                "path_secret": "../outside",
+            },
+            partials_dict={"selected-by-data": "content"},
+            partials_path=tmp_path,
+            logger=logger,
+            log_level=logging.DEBUG,
+        )
+        == "content"
+    )
+
+    assert "Resolved dynamic partial from configured partials" in messages
+    assert "Dynamic partial selector was empty" in messages
+    assert "Dynamic partial selector requested nested dereferencing" in messages
+    assert "Dynamic partial selector did not resolve to a non-empty string" in messages
+    assert "Rejected dynamic partial reference: parent traversal" in messages
+    assert all(
+        secret not in "\n".join(messages)
+        for secret in (
+            "selector_secret",
+            "selected-by-data",
+            "number_secret",
+            "42",
+            "path_secret",
+            "../outside",
+        )
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
 async def test_async_render_loads_a_real_filesystem_partial(
     anyio_backend: str, tmp_path
 ) -> None:
@@ -598,6 +743,63 @@ async def test_async_numeric_lookup_falls_back_past_a_scalar_section_frame(
             "{{#items}}{{0}}{{/items}}", {"items": [1], "0": "outer value"}
         )
         == "outer value"
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_dotted_lookup_does_not_fall_back_after_its_first_name_resolves(
+    anyio_backend: str,
+) -> None:
+    assert (
+        await chevron.async_render(
+            "{{#a}}{{b.c}}{{/a}}",
+            {"a": {"b": {}}, "b": {"c": "outer value"}},
+        )
+        == ""
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_missing_later_dotted_name_does_not_render_its_resolved_prefix(
+    anyio_backend: str,
+) -> None:
+    assert (
+        await chevron.async_render("{{a.b.c}}", {"a": {"b": {"visible": "value"}}})
+        == ""
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_missing_later_dotted_name_does_not_select_a_dynamic_partial(
+    anyio_backend: str,
+) -> None:
+    assert (
+        await chevron.async_render(
+            "{{>*partial.name}}",
+            {"partial": "selected"},
+            partials_dict={"selected": "incorrect partial"},
+        )
+        == ""
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_dotted_lookup_does_not_fall_back_after_value_normalisation_fails(
+    anyio_backend: str,
+) -> None:
+    assert (
+        await chevron.async_render(
+            "{{a.b}}",
+            scopes=[
+                {"a": {"b": TruthinessError()}},
+                {"a": {"b": "outer value"}},
+            ],
+        )
+        == ""
     )
 
 

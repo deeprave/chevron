@@ -2,6 +2,11 @@
 
 Chevron renders [Mustache](https://mustache.github.io/) templates to a complete string. It supports synchronous rendering by default and optional AnyIO-based asynchronous rendering for applications already running on asyncio or Trio.
 
+For Mustache language syntax and general examples, see the [upstream Mustache
+manual](https://github.com/mustache/mustache.github.com/blob/115baf277db1adc09354871271a7ec8dd7b73a5a/mustache.5.html).
+This reference is pinned to its upstream revision; this document describes
+Chevron's API and supported behaviour.
+
 `async_render()` requires a caller-owned running runtime. Chevron never creates or selects an event loop.
 
 ## Render a template
@@ -35,6 +40,38 @@ chevron.render("{{> greeting}}", {"name": "Ada"}, partials_path="partials")
 ```
 
 Chevron rejects absolute names, parent traversal, and resolved paths outside that directory. Use `partials_path='.'` only when intentionally restoring the historical current-directory lookup.
+
+### Dynamic partial names
+
+Prefix a partial name with `*` to choose the partial from the active template
+context. The remainder is a normal dotted name; its resolved text is used once
+as the partial name. Resolving a dynamic name does not add a scope, so the
+selected partial retains the surrounding context.
+
+Because `*` introduces this syntax, a literal partial name cannot begin with
+`*`. This is a small compatibility difference from Chevron 0.14.0, which
+treated such names literally.
+
+```python
+chevron.render(
+    "{{#items}}[{{>*presentation.partial}}]{{/items}}",
+    {
+        "presentation": {"partial": "card"},
+        "items": ["first", "second"],
+    },
+    partials_dict={"card": "{{.}}"},
+)
+# "[first][second]"
+```
+
+Missing names, unavailable partials, and double dereferences such as
+`{{>**partial}}` render nothing. Only non-empty strings can select a dynamic
+partial; values such as `None`, `False`, and numbers render nothing.
+
+Dynamic names use the same mapped-partial precedence and opt-in filesystem
+containment rules as ordinary partials. With `partials_path`, selector data can
+choose any contained partial file. Treat that data as trusted; to restrict
+selection to an allow-list, omit `partials_path` and use `partials_dict` only.
 
 ## Lambdas
 
@@ -201,3 +238,6 @@ chevron.render("{{missing}}", logger=logger, log_level=logging.WARNING)
 ```
 
 `log_level=logging.INFO` includes render lifecycle messages, and `logging.DEBUG` adds bounded resolution and partial decisions. Logging is synchronous for both APIs, so supplied handlers should remain minimal; configure queue-backed logging through the standard logging package if required.
+
+Missing or unreadable partials render empty as normal Mustache behaviour;
+partial-resolution details are available only at `logging.DEBUG`.

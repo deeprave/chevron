@@ -27,6 +27,7 @@ from .renderer import (
     _filesystem_partial_rejection_reason,
     _lambda_protocol,
     _normalise_value,
+    _partial_name,
     _prepare_render_context,
     _read_template_result,
     _validated_tokens,
@@ -53,21 +54,26 @@ async def _aget_filesystem_partial(
     partials_path: str | Path | None,
     partials_ext: str,
     logger: _RenderLogger,
+    *,
+    dynamic: bool = False,
 ) -> str:
     """Load a partial through AnyIO's asynchronous path and file API."""
     if partials_path is None or partials_path == "":
-        logger.debug("Partial '%s' was not configured", name)
+        if dynamic:
+            logger.debug("Dynamic partial was not configured")
+        else:
+            logger.debug("Partial '%s' was not configured", name)
         return ""
 
     try:
         base_path = await anyio.Path(partials_path).resolve(strict=True)
         partial_name = _filesystem_partial_name(name, partials_ext)
         if partial_name is None:
-            logger.debug(
-                "Rejected partial reference '%s': %s",
-                name,
-                _filesystem_partial_rejection_reason(name, partials_ext),
-            )
+            reason = _filesystem_partial_rejection_reason(name, partials_ext)
+            if dynamic:
+                logger.debug("Rejected dynamic partial reference: %s", reason)
+            else:
+                logger.debug("Rejected partial reference '%s': %s", name, reason)
             return ""
 
         partial_path = await (base_path / partial_name).resolve(strict=True)
@@ -78,10 +84,16 @@ async def _aget_filesystem_partial(
         finally:
             with anyio.CancelScope(shield=True):
                 await partial.aclose()
-        logger.debug("Resolved partial '%s' from the configured path", name)
+        if dynamic:
+            logger.debug("Resolved dynamic partial from the configured path")
+        else:
+            logger.debug("Resolved partial '%s' from the configured path", name)
         return content
     except (OSError, RuntimeError, ValueError):
-        logger.debug("Partial '%s' was unavailable", name)
+        if dynamic:
+            logger.debug("Dynamic partial was unavailable")
+        else:
+            logger.debug("Partial '%s' was unavailable", name)
         return ""
 
 
@@ -277,15 +289,25 @@ class AsyncChevronRender:
 
     async def render_partial(self, key: str, frame: _RenderFrame, output: str) -> str:
         config = self.config
+        dynamic = key.startswith("*")
+        name = _partial_name(key, frame, self.policy, config.logger)
+        if name is None:
+            return ""
         try:
-            partial = config.partials_dict[key]
-            config.logger.debug("Resolved partial '%s' from configured partials", key)
+            partial = config.partials_dict[name]
+            if dynamic:
+                config.logger.debug("Resolved dynamic partial from configured partials")
+            else:
+                config.logger.debug(
+                    "Resolved partial '%s' from configured partials", name
+                )
         except KeyError:
             partial = await _aget_filesystem_partial(
-                key,
+                name,
                 config.partials_path,
                 config.partials_ext,
                 config.logger,
+                dynamic=dynamic,
             )
         left = output.rpartition("\n")[2]
         padding = frame.padding + left if left.isspace() else frame.padding
