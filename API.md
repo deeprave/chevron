@@ -43,6 +43,10 @@ context. The remainder is a normal dotted name; its resolved text is used once
 as the partial name. Resolving a dynamic name does not add a scope, so the
 selected partial retains the surrounding context.
 
+Because `*` introduces this syntax, a literal partial name cannot begin with
+`*`. This is a small compatibility difference from Chevron 0.14.0, which
+treated such names literally.
+
 ```python
 chevron.render(
     "{{#items}}[{{>*presentation.partial}}]{{/items}}",

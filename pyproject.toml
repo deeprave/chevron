@@ -10,7 +10,7 @@ required-version = "==0.13.1"
 
 [project]
 name = "chevron-ng"
-version = "0.15.0"
+version = "0.16.0"
 description = "Mustache templating language renderer"
 readme = "README.md"
 requires-python = ">=3.11"
