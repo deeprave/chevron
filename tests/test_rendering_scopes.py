@@ -144,6 +144,21 @@ def test_dotted_lookup_does_not_fall_back_after_its_first_name_resolves() -> Non
     )
 
 
+def test_missing_later_dotted_name_does_not_render_its_resolved_prefix() -> None:
+    assert chevron.render("{{a.b.c}}", {"a": {"b": {"visible": "value"}}}) == ""
+
+
+def test_missing_later_dotted_name_does_not_select_a_dynamic_partial() -> None:
+    assert (
+        chevron.render(
+            "{{>*partial.name}}",
+            {"partial": "selected"},
+            partials_dict={"selected": "incorrect partial"},
+        )
+        == ""
+    )
+
+
 def test_numeric_lookup_falls_back_past_a_scalar_section_frame() -> None:
     assert (
         chevron.render("{{#items}}{{0}}{{/items}}", {"items": [1], "0": "outer value"})

@@ -283,7 +283,9 @@ def _get_key(
         try:
             value = value_handler(scope) if value_handler is not None else scope
         except (AttributeError, KeyError, IndexError, ValueError):
-            # Lookup and value normalisation both preserve fallback behaviour.
+            if index:
+                break
+            # Direct-name value normalisation preserves fallback behaviour.
             current_frame = current_frame.parent
             continue
 

@@ -229,3 +229,6 @@ chevron.render("{{missing}}", logger=logger, log_level=logging.WARNING)
 ```
 
 `log_level=logging.INFO` includes render lifecycle messages, and `logging.DEBUG` adds bounded resolution and partial decisions. Logging is synchronous for both APIs, so supplied handlers should remain minimal; configure queue-backed logging through the standard logging package if required.
+
+Missing or unreadable partials render empty as normal Mustache behaviour;
+partial-resolution details are available only at `logging.DEBUG`.

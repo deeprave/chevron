@@ -135,6 +135,19 @@ def test_coercion_errors_fall_back_to_later_scope(value: object) -> None:
     )
 
 
+def test_dotted_lookup_does_not_fall_back_after_value_normalisation_fails() -> None:
+    assert (
+        chevron.render(
+            "{{a.b}}",
+            scopes=[
+                {"a": {"b": TruthinessError()}},
+                {"a": {"b": "outer value"}},
+            ],
+        )
+        == ""
+    )
+
+
 @pytest.mark.parametrize("explicit_lambdas", [False, True])
 def test_recovered_nested_render_failure_does_not_leak_temporary_scope(
     explicit_lambdas: bool,

@@ -30,7 +30,7 @@ Updating the vendor set makes the current standard's expectations visible and pr
 
 ## Impact
 
-Affected areas include `tests/fixtures/mustache-spec/`, `tests/test_specifications.py`, renderer name resolution, and the fixture attribution documentation. There is no public API addition. The core dotted-name correction changes an incorrect outer-scope fallback to match the Mustache specification.
+Affected areas include `tests/fixtures/mustache-spec/`, `tests/test_specifications.py`, renderer name resolution, and the fixture attribution documentation. There is no public API addition. The core dotted-name correction changes an incorrect outer-scope fallback to match the Mustache specification. Partial names beginning with `*` now follow the Mustache dynamic-name extension rather than selecting a literal partial with that leading character.
 
 ## Delivery Approach
 
