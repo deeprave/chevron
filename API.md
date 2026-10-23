@@ -2,6 +2,11 @@
 
 Chevron renders [Mustache](https://mustache.github.io/) templates to a complete string. It supports synchronous rendering by default and optional AnyIO-based asynchronous rendering for applications already running on asyncio or Trio.
 
+For Mustache language syntax and general examples, see the [upstream Mustache
+manual](https://github.com/mustache/mustache.github.com/blob/115baf277db1adc09354871271a7ec8dd7b73a5a/mustache.5.html).
+This reference is pinned to its upstream revision; this document describes
+Chevron's API and supported behaviour.
+
 `async_render()` requires a caller-owned running runtime. Chevron never creates or selects an event loop.
 
 ## Render a template
