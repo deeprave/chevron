@@ -5,9 +5,9 @@ at revision [`e8ec001db7f594521e773c34866aca2b5d6b0037`](https://github.com/must
 
 They replace the former Git submodule so the Chevron test suite is
 self-contained. The fixture set includes lambda, dynamic-name, and inheritance
-modules. The latter two are currently experimental compatibility work and are
-expected to fail until this OpenSpec change is resumed after the iterative
-renderer refactor.
+modules. Lambda and dynamic-name conformance currently pass. Inheritance
+remains experimental compatibility work pending the iterative-renderer
+refactor.
 
 The upstream Mustache specification is MIT licensed. This repository's
 [`LICENSE`](../../../LICENSE) applies to Chevron itself; retain this attribution

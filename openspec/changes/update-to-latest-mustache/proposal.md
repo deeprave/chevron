@@ -41,5 +41,6 @@ pinned the upstream head, refreshed the vendor files, and captured the complete
 The reviewed fixture snapshot is now committed on the draft evaluation branch.
 The compatibility map is used to implement small, shared semantic corrections
 that do not require new rendering control flow, beginning with dotted-name
-context precedence. Dynamic names and inheritance remain subject to assessment
-against the iterative-renderer state-machine work before implementation begins.
+context precedence and dynamic partial names. Inheritance remains deferred to
+the iterative-renderer state-machine work because its block-override state
+requires nested expansion control flow.

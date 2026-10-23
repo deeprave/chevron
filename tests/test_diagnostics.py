@@ -235,6 +235,44 @@ def test_filesystem_partial_debug_outcomes(tmp_path) -> None:
     assert "Partial 'missing' was unavailable" in messages
 
 
+def test_dynamic_partial_debug_messages_do_not_disclose_selector_data(tmp_path) -> None:
+    logger, handler = _logger("test.dynamic-partial")
+
+    assert (
+        chevron.render(
+            "{{>*selector_secret}}{{>*}}{{>**selector_secret}}{{>*number_secret}}{{>*path_secret}}",
+            {
+                "selector_secret": "selected-by-data",
+                "number_secret": 42,
+                "path_secret": "../outside",
+            },
+            partials_dict={"selected-by-data": "content"},
+            partials_path=tmp_path,
+            logger=logger,
+            log_level=logging.DEBUG,
+        )
+        == "content"
+    )
+
+    messages = [message for _, message in _events(handler)]
+    assert "Resolved dynamic partial from configured partials" in messages
+    assert "Dynamic partial selector was empty" in messages
+    assert "Dynamic partial selector requested nested dereferencing" in messages
+    assert "Dynamic partial selector did not resolve to a non-empty string" in messages
+    assert "Rejected dynamic partial reference: parent traversal" in messages
+    assert all(
+        secret not in "\n".join(messages)
+        for secret in (
+            "selector_secret",
+            "selected-by-data",
+            "number_secret",
+            "42",
+            "path_secret",
+            "../outside",
+        )
+    )
+
+
 @pytest.mark.parametrize(
     ("partial", "reason"),
     [("/etc/passwd", "absolute path"), ("../secret", "parent traversal")],

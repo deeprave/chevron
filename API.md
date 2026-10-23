@@ -36,6 +36,34 @@ chevron.render("{{> greeting}}", {"name": "Ada"}, partials_path="partials")
 
 Chevron rejects absolute names, parent traversal, and resolved paths outside that directory. Use `partials_path='.'` only when intentionally restoring the historical current-directory lookup.
 
+### Dynamic partial names
+
+Prefix a partial name with `*` to choose the partial from the active template
+context. The remainder is a normal dotted name; its resolved text is used once
+as the partial name. Resolving a dynamic name does not add a scope, so the
+selected partial retains the surrounding context.
+
+```python
+chevron.render(
+    "{{#items}}[{{>*presentation.partial}}]{{/items}}",
+    {
+        "presentation": {"partial": "card"},
+        "items": ["first", "second"],
+    },
+    partials_dict={"card": "{{.}}"},
+)
+# "[first][second]"
+```
+
+Missing names, unavailable partials, and double dereferences such as
+`{{>**partial}}` render nothing. Only non-empty strings can select a dynamic
+partial; values such as `None`, `False`, and numbers render nothing.
+
+Dynamic names use the same mapped-partial precedence and opt-in filesystem
+containment rules as ordinary partials. With `partials_path`, selector data can
+choose any contained partial file. Treat that data as trusted; to restrict
+selection to an allow-list, omit `partials_path` and use `partials_dict` only.
+
 ## Lambdas
 
 For new code, use `lambdas=` to explicitly authorize callable template names. In this mode, mapped names take precedence over template data and callable values in ordinary data are rejected. This limits callable execution but is not a general template sandbox: keep secrets and rich objects out of template data.

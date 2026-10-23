@@ -24,8 +24,8 @@
 
 ## 4. Implement dynamic partial names
 
-- [ ] 4.1 Extend tokenisation and rendering to resolve `{{>*name}}` tags through the active context before ordinary partial lookup; verify every dynamic-name fixture passes, including dotted resolution, recursion, whitespace, and indentation cases.
-- [ ] 4.2 Add Chevron-owned public-API regression tests for dynamic-partial resolution and missing values; verify configured partial mappings and existing filesystem partial safeguards remain intact.
+- [x] 4.1 Extend tokenisation and rendering to resolve `{{>*name}}` tags through the active context before ordinary partial lookup; verify every dynamic-name fixture passes, including dotted resolution, recursion, whitespace, and indentation cases.
+- [x] 4.2 Add Chevron-owned public-API regression tests for dynamic-partial resolution and missing values; verify configured partial mappings and existing filesystem partial safeguards remain intact.
 
 ## 5. Implement template inheritance
 

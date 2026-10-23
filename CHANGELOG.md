@@ -8,9 +8,14 @@ All notable changes to Chevron are documented in this file.
 
 - `async_render()` provides runtime-neutral async rendering for applications using asyncio or Trio. The optional `anyio` or `trio` extra enables it; async lambdas, readers, iterables, and filesystem partials are supported without a library-owned event loop.
 - Added `API.md` with complete synchronous and asynchronous API, lambda, partial, and logging guidance.
+- Mustache dynamic partial names allow `{{>*name}}` to select one partial from
+  the active context while retaining the caller's scope, partial indentation,
+  and partial lookup policy.
 
 ### Changed
 
+- A partial name beginning with `*` is now a dynamic selector; Chevron no
+  longer treats `{{>*name}}` as a literal partial named `*name`.
 - Renderer scope traversal now uses private immutable frames, so sections and
   nested renders never structurally mutate a caller-provided `scopes` sequence.
 - The internal tokenizer now accepts source text only. Direct callers that supply file-like objects receive a `TypeError`; `chevron.render()` continues to accept file-like templates. Moving input I/O to the renderer boundary prepares the package for async rendering.

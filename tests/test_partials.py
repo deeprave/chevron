@@ -50,3 +50,75 @@ def test_missing_interpolation_values_in_partials_render_empty() -> None:
         )
         == "1st partial:  3rd"
     )
+
+
+def test_dynamic_partial_keeps_the_current_section_scope() -> None:
+    assert (
+        chevron.render(
+            "{{#items}}[{{>*presentation.name}}]{{/items}}",
+            {
+                "presentation": {"name": "item"},
+                "items": ["first", "second"],
+            },
+            partials_dict={"item": "{{.}}"},
+        )
+        == "[first][second]"
+    )
+
+
+def test_missing_or_nested_dynamic_partial_names_render_empty() -> None:
+    assert chevron.render("{{>*missing}}", partials_dict={"missing": "wrong"}) == ""
+    assert chevron.render("{{>*}}", partials_dict={"*": "wrong"}) == ""
+    assert (
+        chevron.render(
+            "{{>**template}}",
+            {"template": "name", "name": "content"},
+            partials_dict={"**template": "wrong", "content": "wrong"},
+        )
+        == ""
+    )
+
+
+def test_dynamic_partial_keeps_mapping_precedence_and_filesystem_containment(
+    tmp_path,
+) -> None:
+    (tmp_path / "choice.mustache").write_text("filesystem", encoding="utf-8")
+    (tmp_path.parent / "outside.mustache").write_text("outside", encoding="utf-8")
+
+    assert (
+        chevron.render(
+            "{{>*selector}}",
+            {"selector": "choice"},
+            partials_path=tmp_path,
+            partials_dict={"choice": "mapping"},
+        )
+        == "mapping"
+    )
+    assert (
+        chevron.render(
+            "{{>*selector}}",
+            {"selector": "../outside"},
+            partials_path=tmp_path,
+        )
+        == ""
+    )
+
+
+def test_dynamic_partial_respects_explicit_lambda_policy() -> None:
+    called = False
+
+    def selector() -> str:
+        nonlocal called
+        called = True
+        return "choice"
+
+    assert (
+        chevron.render(
+            "{{>*selector}}",
+            {"selector": "choice"},
+            partials_dict={"choice": "wrong"},
+            lambdas={"selector": selector},
+        )
+        == ""
+    )
+    assert not called

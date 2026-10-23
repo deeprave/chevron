@@ -33,6 +33,15 @@ The interpolation failure is `Dotted Names - Context Precedence`. The dynamic
 and inheritance failures cover their current upstream extension requirements;
 this map is input to, not an exception from, the eventual all-passing gate.
 
+## Current implementation status
+
+After the isolated dotted-name and dynamic-partial corrections, every dynamic
+name case passes in the synchronous, asyncio, and Trio renderers. Each mode
+now has 167 passing and 27 failing cases; the remaining failures are all from
+the inheritance module. Dynamic partial names resolve exactly one leading
+asterisk name through the active frame, then reuse the established partial
+lookup and rendering path without adding a scope frame.
+
 ## Goals / Non-Goals
 
 **Goals:**

@@ -233,6 +233,7 @@ def _get_key(
     logger: _RenderLogger,
     allow_callable_traversal: bool = True,
     value_handler: Callable[[TemplateData], TemplateData] | None = None,
+    log_resolution: bool = True,
 ) -> TemplateData:
     """Get a key from the current scope."""
 
@@ -242,7 +243,8 @@ def _get_key(
     if key == ".":
         # Then just return the current scope
         scope = _current_scope(frame)
-        logger.debug("Resolved current template scope")
+        if log_resolution:
+            logger.debug("Resolved current template scope")
         return value_handler(scope) if value_handler is not None else scope
 
     # Loop through the scopes
@@ -285,20 +287,22 @@ def _get_key(
             current_frame = current_frame.parent
             continue
 
-        logger.debug("Resolved template name '%s' from template data", key)
+        if log_resolution:
+            logger.debug("Resolved template name '%s' from template data", key)
         return value
 
     # We couldn't find the key in any of the scopes
 
-    logger.debug("Template name '%s' was not found", key)
-    if blocked_callable_traversal:
-        logger.warning(
-            "Could not resolve '%s': callable values cannot be traversed "
-            "when lambdas= is supplied",
-            key,
-        )
-    else:
-        logger.warning("Could not find key '%s'", key)
+    if log_resolution:
+        logger.debug("Template name '%s' was not found", key)
+        if blocked_callable_traversal:
+            logger.warning(
+                "Could not resolve '%s': callable values cannot be traversed "
+                "when lambdas= is supplied",
+                key,
+            )
+        else:
+            logger.warning("Could not find key '%s'", key)
 
     return value_handler(_MISSING) if value_handler is not None else _MISSING
 
@@ -309,15 +313,22 @@ def _get_partial(
     partials_path: str | Path | None,
     partials_ext: str,
     logger: _RenderLogger,
+    *,
+    dynamic: bool = False,
 ) -> TemplateInput:
     """Load a partial"""
     try:
         # Maybe the partial is in the dictionary
         partial = partials_dict[name]
-        logger.debug("Resolved partial '%s' from configured partials", name)
+        if dynamic:
+            logger.debug("Resolved dynamic partial from configured partials")
+        else:
+            logger.debug("Resolved partial '%s' from configured partials", name)
         return partial
     except KeyError:
-        return _get_filesystem_partial(name, partials_path, partials_ext, logger)
+        return _get_filesystem_partial(
+            name, partials_path, partials_ext, logger, dynamic=dynamic
+        )
 
 
 def _filesystem_partial_name(name: str, partials_ext: str) -> Path | None:
@@ -345,33 +356,44 @@ def _get_filesystem_partial(
     partials_path: str | Path | None,
     partials_ext: str,
     logger: _RenderLogger,
+    *,
+    dynamic: bool = False,
 ) -> str:
     """Load a partial from the configured filesystem path."""
     # Don't try loading from the file system if the partials_path is None or empty
     if partials_path is None or partials_path == "":
-        logger.debug("Partial '%s' was not configured", name)
+        if dynamic:
+            logger.debug("Dynamic partial was not configured")
+        else:
+            logger.debug("Partial '%s' was not configured", name)
         return ""
 
     try:
         base_path = Path(partials_path).resolve(strict=True)
         partial_name = _filesystem_partial_name(name, partials_ext)
         if partial_name is None:
-            logger.debug(
-                "Rejected partial reference '%s': %s",
-                name,
-                _filesystem_partial_rejection_reason(name, partials_ext),
-            )
+            reason = _filesystem_partial_rejection_reason(name, partials_ext)
+            if dynamic:
+                logger.debug("Rejected dynamic partial reference: %s", reason)
+            else:
+                logger.debug("Rejected partial reference '%s': %s", name, reason)
             return ""
 
         partial_path = (base_path / partial_name).resolve(strict=True)
         partial_path.relative_to(base_path)
         with partial_path.open("r", encoding="utf-8") as partial:
             content = partial.read()
-        logger.debug("Resolved partial '%s' from the configured path", name)
+        if dynamic:
+            logger.debug("Resolved dynamic partial from the configured path")
+        else:
+            logger.debug("Resolved partial '%s' from the configured path", name)
         return content
 
     except (OSError, RuntimeError, ValueError):
-        logger.debug("Partial '%s' was unavailable", name)
+        if dynamic:
+            logger.debug("Dynamic partial was unavailable")
+        else:
+            logger.debug("Partial '%s' was unavailable", name)
         return ""
 
 
@@ -467,6 +489,7 @@ class _SourcePolicy(Protocol):
         key: str,
         frame: _RenderFrame,
         value_handler: Callable[[TemplateData], TemplateData],
+        log_resolution: bool = True,
     ) -> tuple[TemplateData, bool]:
         """Return the value and whether it came from the explicit mapping."""
         ...
@@ -481,9 +504,14 @@ class _PermissiveSource:
         key: str,
         frame: _RenderFrame,
         value_handler: Callable[[TemplateData], TemplateData],
+        log_resolution: bool = True,
     ) -> tuple[TemplateData, bool]:
         return _get_key(
-            key, frame, logger=self.logger, value_handler=value_handler
+            key,
+            frame,
+            logger=self.logger,
+            value_handler=value_handler,
+            log_resolution=log_resolution,
         ), False
 
 
@@ -504,19 +532,22 @@ class _ExplicitSource:
         key: str,
         frame: _RenderFrame,
         value_handler: Callable[[TemplateData], TemplateData],
+        log_resolution: bool = True,
     ) -> tuple[TemplateData, bool]:
         if key in self.lambdas:
-            self.logger.debug(
-                "Resolved template name '%s' from the lambda mapping", key
-            )
+            if log_resolution:
+                self.logger.debug(
+                    "Resolved template name '%s' from the lambda mapping", key
+                )
             return self.lambdas[key], True
 
         def handle_value(value: TemplateData) -> TemplateData:
             if isinstance(value, Callable):
-                self.logger.warning(
-                    "Callable template data '%s' is rejected when lambdas= is supplied",
-                    key,
-                )
+                if log_resolution:
+                    self.logger.warning(
+                        "Callable template data '%s' is rejected when lambdas= is supplied",
+                        key,
+                    )
                 return ""
             return value_handler(value)
 
@@ -526,7 +557,37 @@ class _ExplicitSource:
             logger=self.logger,
             allow_callable_traversal=False,
             value_handler=handle_value,
+            log_resolution=log_resolution,
         ), False
+
+
+def _partial_name(
+    key: str,
+    frame: _RenderFrame,
+    policy: _SourcePolicy,
+    logger: _RenderLogger,
+) -> str | None:
+    """Resolve one dynamic partial name without changing the active frame."""
+    if not key.startswith("*"):
+        return key
+    if key.startswith("**"):
+        logger.debug("Dynamic partial selector requested nested dereferencing")
+        return None
+
+    dynamic_key = key[1:].strip()
+    if not dynamic_key:
+        logger.debug("Dynamic partial selector was empty")
+        return None
+    value, _ = policy.resolve(
+        dynamic_key,
+        frame,
+        lambda resolved: _normalise_value(dynamic_key, resolved),
+        log_resolution=False,
+    )
+    if isinstance(value, str) and value:
+        return value
+    logger.debug("Dynamic partial selector did not resolve to a non-empty string")
+    return None
 
 
 def _prepare_render_context(
@@ -802,12 +863,17 @@ class ChevronRender:
 
     def render_partial(self, key: str, frame: _RenderFrame, output: str) -> str:
         config = self.config
+        dynamic = key.startswith("*")
+        name = _partial_name(key, frame, self.policy, config.logger)
+        if name is None:
+            return ""
         partial = _get_partial(
-            key,
+            name,
             config.partials_dict,
             config.partials_path,
             config.partials_ext,
             config.logger,
+            dynamic=dynamic,
         )
         left = output.rpartition("\n")[2]
         padding = frame.padding + left if left.isspace() else frame.padding

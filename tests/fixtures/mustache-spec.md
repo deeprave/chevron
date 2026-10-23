@@ -1,7 +1,8 @@
-# Mustache conformance baseline
+# Mustache conformance checkpoint
 
-This report records Chevron's behaviour against the vendored Mustache
-specification fixtures when the fixture snapshot was refreshed.
+This report records Chevron's current behaviour against the vendored Mustache
+specification fixtures. It began as the refresh baseline and is updated as
+conformance corrections land against the same upstream snapshot.
 
 - Upstream snapshot: [`e8ec001db7f594521e773c34866aca2b5d6b0037`](https://github.com/mustache/spec/tree/e8ec001db7f594521e773c34866aca2b5d6b0037)
 - Upstream `HEAD` when this baseline was captured:
@@ -9,10 +10,9 @@ specification fixtures when the fixture snapshot was refreshed.
 - Command: `uv run pytest -m conformance -q --tb=no`
 - Fixture examples: 194 across nine modules
 
-The updated dynamic-name and inheritance modules are intentionally included in
-this baseline even though their unsupported cases currently fail. Future
-conformance work should compare against this snapshot rather than a moving
-upstream `HEAD`.
+The inheritance module remains intentionally included while its unsupported
+cases fail. Future conformance work should compare against this snapshot rather
+than a moving upstream `HEAD`.
 
 ## Synchronous renderer
 
@@ -25,12 +25,11 @@ upstream `HEAD`.
 | partials | 12 | 12 | 0 |
 | sections | 34 | 34 | 0 |
 | lambdas | 10 | 10 | 0 |
-| dynamic names | 21 | 5 | 16 |
+| dynamic names | 21 | 21 | 0 |
 | inheritance | 27 | 0 | 27 |
-| **Total** | **194** | **151** | **43** |
+| **Total** | **194** | **167** | **27** |
 
-The remaining failures are the dynamic-name and inheritance extension cases
-shown above.
+The remaining failures are the inheritance extension cases shown above.
 
 ## Asynchronous renderer
 
@@ -46,9 +45,9 @@ backends. Each backend has the same result profile as the synchronous renderer.
 | partials | 12 | 12 | 0 | 12 | 0 |
 | sections | 34 | 34 | 0 | 34 | 0 |
 | lambdas | 10 | 10 | 0 | 10 | 0 |
-| dynamic names | 21 | 5 | 16 | 5 | 16 |
+| dynamic names | 21 | 21 | 0 | 21 | 0 |
 | inheritance | 27 | 0 | 27 | 0 | 27 |
-| **Total per backend** | **194** | **151** | **43** | **151** | **43** |
+| **Total per backend** | **194** | **167** | **27** | **167** | **27** |
 
 Across the synchronous, asyncio, and Trio executions, the baseline comprises
-582 test executions: 453 pass and 129 fail.
+582 test executions: 501 pass and 81 fail.
