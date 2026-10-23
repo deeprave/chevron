@@ -9,6 +9,12 @@ modules. Lambda and dynamic-name conformance currently pass. Inheritance
 remains experimental compatibility work pending the iterative-renderer
 refactor.
 
+Each case has a pytest marker derived from its source JSON module. For example,
+`~inheritance.json` cases are marked `mustache_inheritance`. The full
+`conformance` marker continues to select every fixture, while a deliberately
+deferred module can be selected or excluded with an expression such as
+`pytest -m 'conformance and not mustache_inheritance'`.
+
 The upstream Mustache specification is MIT licensed. This repository's
 [`LICENSE`](../../../LICENSE) applies to Chevron itself; retain this attribution
 when updating the vendored fixtures.

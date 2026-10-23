@@ -67,6 +67,15 @@ addopts = [
 ]
 markers = [
     "conformance: vendored upstream Mustache specification compatibility tests",
+    "mustache_comments: Mustache comments specification module",
+    "mustache_delimiters: Mustache delimiters specification module",
+    "mustache_dynamic_names: Mustache dynamic names specification module",
+    "mustache_inheritance: Mustache inheritance specification module",
+    "mustache_interpolation: Mustache interpolation specification module",
+    "mustache_inverted: Mustache inverted sections specification module",
+    "mustache_lambdas: Mustache lambdas specification module",
+    "mustache_partials: Mustache partials specification module",
+    "mustache_sections: Mustache sections specification module",
 ]
 
 [tool.coverage.run]

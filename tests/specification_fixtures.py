@@ -15,10 +15,14 @@ def fixture_cases() -> list[object]:
     cases = []
     for fixture_path in sorted(FIXTURE_PATH.glob("*.json")):
         fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        module = fixture_path.stem.lstrip("~").replace("-", "_")
+        marker = getattr(pytest.mark, f"mustache_{module}")
         for case in fixture["tests"]:
             cases.append(
                 pytest.param(
-                    case, id=f"{fixture_path.stem.lstrip('~')}::{case['name']}"
+                    case,
+                    id=f"{fixture_path.stem.lstrip('~')}::{case['name']}",
+                    marks=marker,
                 )
             )
     return cases
