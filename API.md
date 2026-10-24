@@ -77,7 +77,7 @@ selection to an allow-list, omit `partials_path` and use `partials_dict` only.
 
 For new code, use `lambdas=` to explicitly authorize callable template names. In this mode, mapped names take precedence over template data and callable values in ordinary data are rejected. This limits callable execution but is not a general template sandbox: keep secrets and rich objects out of template data.
 
-`@chevron.func` declares a zero-argument interpolation lambda. Chevron recursively renders its returned text using the configured default delimiters:
+`@chevron.func` declares a zero-argument interpolation lambda. Chevron renders its returned text using the configured default delimiters:
 
 ```python
 @chevron.func
@@ -114,6 +114,12 @@ def choose_first(body, render):
 ```
 
 Omit `lambdas` to retain the legacy compatibility behaviour for existing two-argument section callbacks. Pass `lambdas={}` to allow no callable template tags.
+
+### Nested expansion
+
+Chevron renders finite engine-owned chains of partials and lambda results without relying on Python's call-stack depth. This includes deeply nested partials and templates returned by `@chevron.func` or `@chevron.section` callbacks.
+
+This guarantee does not apply when application code recursively calls the `render()` helper supplied to `@chevron.compat`. That recursion is controlled by the callback and continues to use the host call stack. Cyclic engine-owned expansion is rejected with a bounded `RecursionError` rather than consuming unbounded memory.
 
 ## Async rendering
 

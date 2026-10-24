@@ -1,7 +1,6 @@
 from collections.abc import (
     AsyncIterable,
     Callable,
-    Generator,
     Iterator,
     Mapping,
     Sequence,
@@ -12,7 +11,7 @@ import inspect
 import logging
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Protocol, TypeAlias, cast
+from typing import Any, Generic, Protocol, TypeAlias, TypeVar, cast
 
 from .tokenizer import ChevronError, tokenize as _tokenize
 
@@ -24,6 +23,8 @@ _SECTION_PROTOCOL = "section"
 _COMPAT_PROTOCOL = "compat"
 _LOGGER_NAME = "chevron"
 _DEFAULT_LOGGER = logging.getLogger(_LOGGER_NAME)
+_MAX_ACTIVE_WORK = 10_000
+_END_OF_TOKENS = object()
 
 TemplateData: TypeAlias = Any
 """A value exposed to Mustache lookup, intentionally dynamically typed."""
@@ -40,6 +41,7 @@ LambdaCallback: TypeAlias = Callable[..., TemplateData]
 LambdaRegistry: TypeAlias = Mapping[str, LambdaCallback]
 Logger: TypeAlias = logging.Logger | logging.LoggerAdapter[logging.Logger]
 TemplateReader: TypeAlias = Callable[[], TemplateData]
+ContinuationResult = TypeVar("ContinuationResult")
 
 
 class _RenderLogger(logging.LoggerAdapter[Logger]):
@@ -467,9 +469,104 @@ class _RenderFrame:
 
 @dataclass
 class _RenderState:
-    """Compatibility token reuse shared by recursive render frames."""
+    """Compatibility token reuse shared by one renderer instance."""
 
     token_cache: dict[str, list[Token]] = field(default_factory=dict)
+
+
+@dataclass
+class _RenderWork(Generic[ContinuationResult]):
+    """One active token stream and the state needed to resume it."""
+
+    tokens: TokenIterator
+    frame: _RenderFrame
+    delimiters: tuple[str, str]
+    continuation: Callable[[str], ContinuationResult] | None = None
+    output: list[str] = field(default_factory=list)
+    current_line_padding: list[str] = field(default_factory=list)
+    current_line_has_content: bool = False
+    current_line_is_whitespace: bool = False
+    token_close: Callable[[], object] | None = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        close = getattr(self.tokens, "close", None)
+        self.token_close = close if callable(close) else None
+
+    def close_tokens(self) -> None:
+        """Close an owned generator at most once."""
+        if self.token_close is not None:
+            close, self.token_close = self.token_close, None
+            close()
+
+    @classmethod
+    def from_tokens(
+        cls,
+        tokens: TokenIterator,
+        frame: _RenderFrame,
+        continuation: Callable[[str], ContinuationResult] | None = None,
+    ) -> "_RenderWork[ContinuationResult]":
+        """Create work whose token context matches its frame."""
+        return cls(tokens, frame, frame.delimiters, continuation)
+
+    def append(self, text: str) -> None:
+        """Append output and retain the suffix needed for partial padding."""
+        self.output.append(text)
+        if "\n" in text:
+            self._set_current_line(text.rsplit("\n", 1)[1])
+        elif text:
+            self._append_current_line(text)
+
+    def partial_padding(self) -> str:
+        """Return current-line indentation when it is whitespace only."""
+        return "".join(self.current_line_padding)
+
+    def _set_current_line(self, text: str) -> None:
+        self.current_line_has_content = bool(text)
+        self.current_line_is_whitespace = text.isspace()
+        self.current_line_padding = [text] if self.current_line_is_whitespace else []
+
+    def _append_current_line(self, text: str) -> None:
+        if not self.current_line_has_content:
+            self._set_current_line(text)
+        elif self.current_line_is_whitespace and text.isspace():
+            self.current_line_padding.append(text)
+        elif not text.isspace():
+            self.current_line_is_whitespace = False
+            self.current_line_padding.clear()
+
+
+def _push_work(
+    active: list[_RenderWork[ContinuationResult]], work: _RenderWork[ContinuationResult]
+) -> None:
+    """Push bounded engine-owned work, closing rejected token streams."""
+    if len(active) >= _MAX_ACTIVE_WORK:
+        work.close_tokens()
+        raise RecursionError("nested template expansion exceeded the active-work limit")
+    active.append(work)
+
+
+def _apply_control_token(
+    work: _RenderWork[ContinuationResult], tag: str, key: str
+) -> bool:
+    """Apply context-only tokens and report whether no dispatch remains."""
+    if tag == "end":
+        if work.frame.parent is not None:
+            work.frame = work.frame.parent
+        return True
+    if tag == "set delimiter":
+        work.delimiters = _changed_delimiters(key)
+        return True
+    if work.frame.scope is _SKIPPED_SECTION_MARKER and work.frame.parent is not None:
+        if tag in ("section", "inverted section"):
+            work.frame = work.frame.child(_SKIPPED_SECTION_MARKER)
+        return True
+    return False
+
+
+def _interpolation_text(value: TemplateData, tag: str) -> str:
+    """Normalise and escape one interpolation result."""
+    text = value if isinstance(value, str) else str(value)
+    return _html_escape(text) if tag == "variable" else text
 
 
 def _validated_tokens(tokens: TokenSequence) -> TokenIterator:
@@ -731,24 +828,48 @@ class ChevronRender:
 
     def render(self, template: TemplateInput, frame: _RenderFrame) -> str:
         """Render source or tokens using the supplied immutable frame chain."""
-        token_stream: Generator[Token, None, None] | None = None
+        return self._drive(self._template_work(template, frame))
+
+    def _template_work(
+        self,
+        template: TemplateInput,
+        frame: _RenderFrame,
+        continuation: Callable[[str], None] | None = None,
+    ) -> _RenderWork[None]:
+        if isinstance(template, (bytes, bytearray)):
+            raise TypeError("templates must be text")
+        if isinstance(template, Sequence) and not isinstance(template, str):
+            tokens = _validated_tokens(template)
+        else:
+            reader = getattr(template, "read", None)
+            if reader is not None:
+                template = _read_sync_template(reader)
+            if not template and not isinstance(template, str):
+                template = ""
+            tokens = _tokenize(template, *frame.delimiters, include_raw=True)
+        return _RenderWork[None](tokens, frame, frame.delimiters, continuation)
+
+    def _drive(self, root: _RenderWork[None]) -> str:
+        """Run active work without placing nested template expansion on the stack."""
+        active = [root]
         try:
-            if isinstance(template, (bytes, bytearray)):
-                raise TypeError("templates must be text")
-            if isinstance(template, Sequence) and not isinstance(template, str):
-                tokens = _validated_tokens(template)
-            else:
-                reader = getattr(template, "read", None)
-                if reader is not None:
-                    template = _read_sync_template(reader)
-                if not template and not isinstance(template, str):
-                    template = ""
-                token_stream = _tokenize(template, *frame.delimiters, include_raw=True)
-                tokens = token_stream
-            return self.render_tokens(tokens, frame)
+            while active:
+                work = active[-1]
+                token = next(work.tokens, _END_OF_TOKENS)
+                if token is _END_OF_TOKENS:
+                    active.pop()
+                    work.close_tokens()
+                    result = "".join(work.output)
+                    if not active:
+                        return result
+                    assert work.continuation is not None
+                    work.continuation(result)
+                    continue
+                self._render_token(work, cast(Token, token), active)
         finally:
-            if token_stream is not None:
-                token_stream.close()
+            for work in reversed(active):
+                work.close_tokens()
+        raise RuntimeError("render work completed without a root result")
 
     def resolve(self, key: str, frame: _RenderFrame) -> tuple[TemplateData, bool]:
         return self.policy.resolve(
@@ -765,36 +886,24 @@ class ChevronRender:
         )
         return ""
 
-    def render_result(self, result: TemplateData, key: str, frame: _RenderFrame) -> str:
+    def _schedule_result(
+        self,
+        result: TemplateData,
+        key: str,
+        frame: _RenderFrame,
+        active: list[_RenderWork[None]],
+        continuation: Callable[[str], None],
+    ) -> None:
         result = _reject_awaitable_lambda_result(result, key)
         if result is None:
-            return self.empty_result(key)
-        return self.render(result if isinstance(result, str) else str(result), frame)
-
-    def interpolation(self, key: str, frame: _RenderFrame) -> TemplateData:
-        value, explicit = self.resolve(key, frame)
-        if not isinstance(value, Callable):
-            return value
-        protocol = _lambda_protocol(value, "interpolation")
-        self.config.logger.debug(
-            "Selected %s lambda protocol for '%s'", protocol or "unsupported", key
+            continuation(self.empty_result(key))
+            return
+        _push_work(
+            active,
+            self._template_work(
+                result if isinstance(result, str) else str(result), frame, continuation
+            ),
         )
-        if protocol == _FUNCTION_PROTOCOL:
-            result_frame = frame.with_context(self.config.default_delimiters, "")
-            return self.render_result(value(), key, result_frame)
-        if explicit or isinstance(value, _LambdaDefinition):
-            return ""
-        return value
-
-    def standard_section(
-        self,
-        callback: LambdaCallback,
-        key: str,
-        body: _SectionBody,
-        frame: _RenderFrame,
-    ) -> str:
-        result_frame = frame.with_context(body.opening, frame.padding)
-        return self.render_result(callback(body.source()), key, result_frame)
 
     def compatibility_section(
         self,
@@ -815,7 +924,11 @@ class ChevronRender:
             return self.compatibility_render(template, child)
 
         result = _reject_awaitable_lambda_result(callback(text, render_callback), key)
-        return self.empty_result(key) if result is None else cast(str, result)
+        if result is None:
+            return self.empty_result(key)
+        if not isinstance(result, str):
+            raise TypeError(f"Compatibility lambda '{key}' must return text")
+        return result
 
     def compatibility_render(self, template: TemplateInput, frame: _RenderFrame) -> str:
         """Only legacy callbacks replay the invocation's reconstructed tokens."""
@@ -825,50 +938,67 @@ class ChevronRender:
             template = self.state.token_cache[template]
         return self.render(template, frame)
 
-    _section_handlers = {
-        _SECTION_PROTOCOL: standard_section,
-        _COMPAT_PROTOCOL: compatibility_section,
-    }
-
-    def render_section(
+    def _render_section(
         self,
         key: str,
-        tokens: TokenIterator,
-        frame: _RenderFrame,
-        delimiters: tuple[str, str],
-    ) -> tuple[str, tuple[str, str], _RenderFrame]:
-        value, _ = self.resolve(key, frame)
+        work: _RenderWork[None],
+        active: list[_RenderWork[None]],
+    ) -> None:
+        value, _ = self.resolve(key, work.frame)
         if isinstance(value, Callable):
-            body = _collect_section(tokens, key, delimiters)
+            body = _collect_section(work.tokens, key, work.delimiters)
+            work.delimiters = body.ending
             protocol = _lambda_protocol(value, "section")
             self.config.logger.debug(
                 "Selected %s lambda protocol for '%s'", protocol or "unsupported", key
             )
-            handler = self._section_handlers.get(protocol)
-            result = (
-                handler(self, value, key, body, frame) if handler is not None else ""
-            )
-            return result, body.ending, frame
+            if protocol == _SECTION_PROTOCOL:
+                result_frame = work.frame.with_context(body.opening, work.frame.padding)
+                self._schedule_result(
+                    value(body.source()),
+                    key,
+                    result_frame,
+                    active,
+                    work.append,
+                )
+            elif protocol == _COMPAT_PROTOCOL:
+                work.append(self.compatibility_section(value, key, body, work.frame))
+            return
         if isinstance(value, AsyncIterable):
             raise TypeError(
                 f"Section '{key}' resolved to an async iterable; "
                 "use chevron.async_render instead"
             )
         if isinstance(value, (Sequence, Iterator)) and not isinstance(value, str):
-            body = _collect_section(tokens, key, delimiters)
-            output = ""
-            for item in value:
-                child = frame.child(item, body.opening, frame.padding)
-                output += self.render(body.tokens, child)
-            return output, body.ending, frame
-        return "", delimiters, frame.child(value if value else _SKIPPED_SECTION_MARKER)
+            body = _collect_section(work.tokens, key, work.delimiters)
+            work.delimiters = body.ending
+            values = iter(value)
 
-    def render_partial(self, key: str, frame: _RenderFrame, output: str) -> str:
+            def render_next(result: str | None = None) -> None:
+                if result is not None:
+                    work.append(result)
+                try:
+                    item = next(values)
+                except StopIteration:
+                    return
+                child = work.frame.child(item, body.opening, work.frame.padding)
+                _push_work(
+                    active,
+                    _RenderWork.from_tokens(iter(body.tokens), child, render_next),
+                )
+
+            render_next()
+            return
+        work.frame = work.frame.child(value if value else _SKIPPED_SECTION_MARKER)
+
+    def _render_partial(
+        self, key: str, work: _RenderWork[None], active: list[_RenderWork[None]]
+    ) -> None:
         config = self.config
         dynamic = key.startswith("*")
-        name = _partial_name(key, frame, self.policy, config.logger)
+        name = _partial_name(key, work.frame, self.policy, config.logger)
         if name is None:
-            return ""
+            return
         partial = _get_partial(
             name,
             config.partials_dict,
@@ -877,59 +1007,73 @@ class ChevronRender:
             config.logger,
             dynamic=dynamic,
         )
-        left = output.rpartition("\n")[2]
-        padding = frame.padding + left if left.isspace() else frame.padding
-        child = frame.with_context(config.default_delimiters, padding)
-        result = self.render(partial, child)
-        return result.rstrip(" \t") if left.isspace() else result
+        left = work.partial_padding()
+        padding = work.frame.padding + left if left.isspace() else work.frame.padding
+        child = work.frame.with_context(config.default_delimiters, padding)
 
-    def render_tokens(self, tokens: TokenIterator, frame: _RenderFrame) -> str:
-        output = ""
-        delimiters = frame.delimiters
-        for token in tokens:
-            tag, key = token[:2]
-            current_scope = frame.scope
-            if tag == "end":
-                if frame.parent is not None:
-                    frame = frame.parent
-                continue
-            if tag == "set delimiter":
-                delimiters = _changed_delimiters(key)
-                continue
-            if current_scope is _SKIPPED_SECTION_MARKER and frame.parent is not None:
-                if tag in ("section", "inverted section"):
-                    frame = frame.child(_SKIPPED_SECTION_MARKER)
-                continue
+        def append_partial(result: str) -> None:
+            work.append(result.rstrip(" \t") if left.isspace() else result)
 
-            match tag:
-                case "literal":
-                    output += key.replace("\n", "\n" + frame.padding)
-                case "variable" | "no escape":
-                    value = self.interpolation(key, frame)
-                    text = value if isinstance(value, str) else str(value)
-                    output += _html_escape(text) if tag == "variable" else text
-                case "section":
-                    result, delimiters, frame = self.render_section(
-                        key, tokens, frame, delimiters
+        _push_work(active, self._template_work(partial, child, append_partial))
+
+    def _render_token(
+        self,
+        work: _RenderWork[None],
+        token: Token,
+        active: list[_RenderWork[None]],
+    ) -> None:
+        tag, key = token[:2]
+        if _apply_control_token(work, tag, key):
+            return
+
+        match tag:
+            case "literal":
+                work.append(key.replace("\n", "\n" + work.frame.padding))
+            case "variable" | "no escape":
+                self._render_interpolation(key, tag, work, active)
+            case "section":
+                self._render_section(key, work, active)
+            case "inverted section":
+                value, _ = self.policy.resolve(
+                    key, work.frame, lambda value: _normalise_value(key, value)
+                )
+                if isinstance(value, AsyncIterable):
+                    raise TypeError(
+                        f"Section '{key}' resolved to an async iterable; "
+                        "use chevron.async_render instead"
                     )
-                    output += result
-                case "inverted section":
-                    value, _ = self.policy.resolve(
-                        key, frame, lambda value: _normalise_value(key, value)
-                    )
-                    if isinstance(value, AsyncIterable):
-                        raise TypeError(
-                            f"Section '{key}' resolved to an async iterable; "
-                            "use chevron.async_render instead"
-                        )
-                    frame = frame.child(
-                        _INVERTED_SECTION_MARKER
-                        if not value
-                        else _SKIPPED_SECTION_MARKER
-                    )
-                case "partial":
-                    output += self.render_partial(key, frame, output)
-        return output
+                work.frame = work.frame.child(
+                    _INVERTED_SECTION_MARKER if not value else _SKIPPED_SECTION_MARKER
+                )
+            case "partial":
+                self._render_partial(key, work, active)
+
+    def _render_interpolation(
+        self,
+        key: str,
+        tag: str,
+        work: _RenderWork[None],
+        active: list[_RenderWork[None]],
+    ) -> None:
+        value, explicit = self.resolve(key, work.frame)
+
+        def append_value(result: TemplateData) -> None:
+            work.append(_interpolation_text(result, tag))
+
+        if not isinstance(value, Callable):
+            append_value(value)
+            return
+        protocol = _lambda_protocol(value, "interpolation")
+        self.config.logger.debug(
+            "Selected %s lambda protocol for '%s'", protocol or "unsupported", key
+        )
+        if protocol == _FUNCTION_PROTOCOL:
+            result_frame = work.frame.with_context(self.config.default_delimiters, "")
+            self._schedule_result(value(), key, result_frame, active, append_value)
+        elif explicit or isinstance(value, _LambdaDefinition):
+            append_value("")
+        else:
+            append_value(value)
 
 
 def render(

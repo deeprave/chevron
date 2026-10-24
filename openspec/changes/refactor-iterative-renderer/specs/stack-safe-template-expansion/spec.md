@@ -11,7 +11,9 @@ runtime's recursive call-stack depth.
 
 Chevron SHALL render a finite chain of nested template expansions without
 failing solely because its nesting exceeds the host runtime's recursive
-call-stack depth. This applies to public synchronous and asynchronous renders.
+call-stack depth. This applies to public synchronous and asynchronous renders
+for engine-owned partial and lambda-result expansion. Recursion initiated by a
+caller through a compatibility callback remains caller-controlled.
 
 #### Scenario: Deep synchronous partial expansion
 
@@ -22,6 +24,11 @@ call-stack depth. This applies to public synchronous and asynchronous renders.
 
 - **WHEN** an asynchronous render expands a finite chain of templates returned by supported lambda protocols deeper than the host runtime's normal recursion limit
 - **THEN** it returns the expected rendered text without a recursion-depth failure
+
+#### Scenario: Cyclic engine-owned expansion fails with a bounded error
+
+- **WHEN** a partial or lambda result recursively expands itself without a finite end
+- **THEN** Chevron raises a bounded `RecursionError` rather than consuming unbounded memory
 
 ### Requirement: Nested expansion preserves rendering context
 

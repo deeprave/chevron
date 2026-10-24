@@ -1,4 +1,9 @@
+import sys
+
+import pytest
+
 import chevron
+from chevron import renderer
 
 
 def test_unicode_partial_content_renders_unchanged() -> None:
@@ -8,6 +13,44 @@ def test_unicode_partial_content_renders_unchanged() -> None:
         )
         == "(╯°□°）╯︵ ┻━┻"
     )
+
+
+def test_deep_finite_partial_expansion_does_not_use_the_python_call_stack() -> None:
+    depth = sys.getrecursionlimit() + 10
+    partials = {
+        f"partial-{index}": f"{{{{>partial-{index + 1}}}}}" for index in range(depth)
+    }
+    partials[f"partial-{depth}"] = "complete"
+
+    assert chevron.render("{{>partial-0}}", partials_dict=partials) == "complete"
+
+
+def test_deep_partial_resumes_parent_scope_and_indentation() -> None:
+    depth = sys.getrecursionlimit() + 10
+    partials = {
+        f"partial-{index}": f"{{{{>partial-{index + 1}}}}}" for index in range(depth)
+    }
+    partials[f"partial-{depth}"] = "{{name}}"
+
+    shallow = chevron.render(
+        "{{#item}}  {{>partial-0}}|{{name}}{{/item}}",
+        {"item": {"name": "inner"}},
+        partials_dict={"partial-0": "{{name}}"},
+    )
+    deep = chevron.render(
+        "{{#item}}  {{>partial-0}}|{{name}}{{/item}}",
+        {"item": {"name": "inner"}},
+        partials_dict=partials,
+    )
+
+    assert deep == shallow == "  inner|inner"
+
+
+def test_cyclic_partial_fails_with_a_bounded_error(monkeypatch) -> None:
+    monkeypatch.setattr(renderer, "_MAX_ACTIVE_WORK", 4)
+
+    with pytest.raises(RecursionError, match="nested template expansion"):
+        chevron.render("{{>self}}", partials_dict={"self": "{{>self}}"})
 
 
 def test_missing_values_in_configured_partials_render_empty() -> None:

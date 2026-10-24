@@ -1,6 +1,6 @@
 """AnyIO-backed rendering, loaded only by :func:`chevron.async_render`."""
 
-from collections.abc import AsyncIterable, Callable, Generator, Iterator, Sequence
+from collections.abc import AsyncIterable, Awaitable, Callable, Iterator, Sequence
 import inspect
 import logging
 from pathlib import Path
@@ -9,25 +9,29 @@ import anyio
 
 from .renderer import (
     _COMPAT_PROTOCOL,
+    _END_OF_TOKENS,
     _FUNCTION_PROTOCOL,
     _LambdaDefinition,
     _RenderConfig,
     _RenderFrame,
     _RenderLogger,
     _RenderState,
+    _RenderWork,
     _SECTION_PROTOCOL,
     _INVERTED_SECTION_MARKER,
     _SKIPPED_SECTION_MARKER,
     _SourcePolicy,
     _SectionBody,
     _changed_delimiters,
-    _html_escape,
+    _apply_control_token,
+    _interpolation_text,
     _close_awaitable,
     _filesystem_partial_name,
     _filesystem_partial_rejection_reason,
     _lambda_protocol,
     _normalise_value,
     _partial_name,
+    _push_work,
     _prepare_render_context,
     _read_template_result,
     _validated_tokens,
@@ -129,23 +133,56 @@ class AsyncChevronRender:
         return _read_template_result(value)
 
     async def render(self, template: TemplateInput, frame: _RenderFrame) -> str:
-        token_stream: Generator[Token, None, None] | None = None
+        await anyio.lowlevel.checkpoint()
+        return await self._drive(await self._template_work(template, frame))
+
+    async def _template_work(
+        self,
+        template: TemplateInput,
+        frame: _RenderFrame,
+        continuation: Callable[[str], Awaitable[None]] | None = None,
+    ) -> _RenderWork[Awaitable[None]]:
+        if isinstance(template, (bytes, bytearray)):
+            raise TypeError("templates must be text")
+        if isinstance(template, Sequence) and not isinstance(template, str):
+            tokens = _validated_tokens(template)
+        else:
+            template = await self._read_template(template)
+            if not template and not isinstance(template, str):
+                template = ""
+            tokens = _tokenize(template, *frame.delimiters, include_raw=True)
+        return _RenderWork[Awaitable[None]](
+            tokens, frame, frame.delimiters, continuation
+        )
+
+    async def _drive(self, root: _RenderWork[Awaitable[None]]) -> str:
+        """Run active work while preserving the renderer's checkpoint cadence."""
+        active = [root]
+        progress_count = 0
         try:
-            await anyio.lowlevel.checkpoint()
-            if isinstance(template, (bytes, bytearray)):
-                raise TypeError("templates must be text")
-            if isinstance(template, Sequence) and not isinstance(template, str):
-                tokens = _validated_tokens(template)
-            else:
-                template = await self._read_template(template)
-                if not template and not isinstance(template, str):
-                    template = ""
-                token_stream = _tokenize(template, *frame.delimiters, include_raw=True)
-                tokens = token_stream
-            return await self.render_tokens(tokens, frame)
+            while active:
+                work = active[-1]
+                progress_count += 1
+                if progress_count % 64 == 0:
+                    await anyio.lowlevel.checkpoint()
+                try:
+                    token = next(work.tokens)
+                except StopIteration:
+                    token = _END_OF_TOKENS
+                if token is _END_OF_TOKENS:
+                    active.pop()
+                    work.close_tokens()
+                    result = "".join(work.output)
+                    if not active:
+                        return result
+                    assert work.continuation is not None
+                    await work.continuation(result)
+                    continue
+                await self._render_token(work, cast(Token, token), active)
         finally:
-            if token_stream is not None:
-                token_stream.close()
+            for work in reversed(active):
+                work.close_tokens()
+        raise RuntimeError("render work completed without a root result")
 
     def resolve(self, key: str, frame: _RenderFrame) -> tuple[TemplateData, bool]:
         return self.policy.resolve(
@@ -162,41 +199,24 @@ class AsyncChevronRender:
         )
         return ""
 
-    async def render_result(
-        self, result: TemplateData, key: str, frame: _RenderFrame
-    ) -> str:
-        if result is None:
-            return self.empty_result(key)
-        return await self.render(
-            result if isinstance(result, str) else str(result), frame
-        )
-
-    async def interpolation(self, key: str, frame: _RenderFrame) -> TemplateData:
-        value, explicit = self.resolve(key, frame)
-        if not isinstance(value, Callable):
-            return value
-        protocol = _lambda_protocol(value, "interpolation")
-        self.config.logger.debug(
-            "Selected %s lambda protocol for '%s'", protocol or "unsupported", key
-        )
-        if protocol == _FUNCTION_PROTOCOL:
-            result_frame = frame.with_context(self.config.default_delimiters, "")
-            result = await self._await_result(value())
-            return await self.render_result(result, key, result_frame)
-        if explicit or isinstance(value, _LambdaDefinition):
-            return ""
-        return value
-
-    async def standard_section(
+    async def _schedule_result(
         self,
-        callback: LambdaCallback,
+        result: TemplateData,
         key: str,
-        body: _SectionBody,
         frame: _RenderFrame,
-    ) -> str:
-        result_frame = frame.with_context(body.opening, frame.padding)
-        result = await self._await_result(callback(body.source()))
-        return await self.render_result(result, key, result_frame)
+        active: list[_RenderWork[Awaitable[None]]],
+        continuation: Callable[[str], Awaitable[None]],
+    ) -> None:
+        result = await self._await_result(result)
+        if result is None:
+            await continuation(self.empty_result(key))
+            return
+        _push_work(
+            active,
+            await self._template_work(
+                result if isinstance(result, str) else str(result), frame, continuation
+            ),
+        )
 
     async def compatibility_section(
         self,
@@ -217,7 +237,11 @@ class AsyncChevronRender:
             return await self.compatibility_render(template, child)
 
         result = await self._await_result(callback(text, render_callback))
-        return self.empty_result(key) if result is None else cast(str, result)
+        if result is None:
+            return self.empty_result(key)
+        if not isinstance(result, str):
+            raise TypeError(f"Compatibility lambda '{key}' must return text")
+        return result
 
     async def compatibility_render(
         self, template: TemplateInput, frame: _RenderFrame
@@ -250,49 +274,91 @@ class AsyncChevronRender:
                 ending = _changed_delimiters(name)
         return _SectionBody(body, delimiters, ending)
 
-    async def render_section(
+    async def _render_section(
         self,
         key: str,
-        tokens: TokenIterator,
-        frame: _RenderFrame,
-        delimiters: tuple[str, str],
-    ) -> tuple[str, tuple[str, str], _RenderFrame]:
-        value, _ = self.resolve(key, frame)
+        work: _RenderWork[Awaitable[None]],
+        active: list[_RenderWork[Awaitable[None]]],
+    ) -> None:
+        value, _ = self.resolve(key, work.frame)
         if isinstance(value, Callable):
-            body = await self.collect_section(tokens, key, delimiters)
+            body = await self.collect_section(work.tokens, key, work.delimiters)
+            work.delimiters = body.ending
             protocol = _lambda_protocol(value, "section")
             self.config.logger.debug(
                 "Selected %s lambda protocol for '%s'", protocol or "unsupported", key
             )
             if protocol == _SECTION_PROTOCOL:
-                result = await self.standard_section(value, key, body, frame)
-            elif protocol == _COMPAT_PROTOCOL:
-                result = await self.compatibility_section(value, key, body, frame)
-            else:
-                result = ""
-            return result, body.ending, frame
-        if isinstance(value, AsyncIterable):
-            body = await self.collect_section(tokens, key, delimiters)
-            output = []
-            async for item in value:
-                child = frame.child(item, body.opening, frame.padding)
-                output.append(await self.render(body.tokens, child))
-            return "".join(output), body.ending, frame
-        if isinstance(value, (Sequence, Iterator)) and not isinstance(value, str):
-            body = await self.collect_section(tokens, key, delimiters)
-            output = []
-            for item in value:
-                child = frame.child(item, body.opening, frame.padding)
-                output.append(await self.render(body.tokens, child))
-            return "".join(output), body.ending, frame
-        return "", delimiters, frame.child(value if value else _SKIPPED_SECTION_MARKER)
+                result_frame = work.frame.with_context(body.opening, work.frame.padding)
 
-    async def render_partial(self, key: str, frame: _RenderFrame, output: str) -> str:
+                async def append_result(result: str) -> None:
+                    work.append(result)
+
+                await self._schedule_result(
+                    value(body.source()),
+                    key,
+                    result_frame,
+                    active,
+                    append_result,
+                )
+            elif protocol == _COMPAT_PROTOCOL:
+                work.append(
+                    await self.compatibility_section(value, key, body, work.frame)
+                )
+            return
+        if isinstance(value, AsyncIterable):
+            body = await self.collect_section(work.tokens, key, work.delimiters)
+            work.delimiters = body.ending
+            values = aiter(value)
+
+            async def render_next(result: str | None = None) -> None:
+                if result is not None:
+                    work.append(result)
+                try:
+                    item = await anext(values)
+                except StopAsyncIteration:
+                    return
+                child = work.frame.child(item, body.opening, work.frame.padding)
+                _push_work(
+                    active,
+                    _RenderWork.from_tokens(iter(body.tokens), child, render_next),
+                )
+
+            await render_next()
+            return
+        if isinstance(value, (Sequence, Iterator)) and not isinstance(value, str):
+            body = await self.collect_section(work.tokens, key, work.delimiters)
+            work.delimiters = body.ending
+            values = iter(value)
+
+            async def render_next(result: str | None = None) -> None:
+                if result is not None:
+                    work.append(result)
+                try:
+                    item = next(values)
+                except StopIteration:
+                    return
+                child = work.frame.child(item, body.opening, work.frame.padding)
+                _push_work(
+                    active,
+                    _RenderWork.from_tokens(iter(body.tokens), child, render_next),
+                )
+
+            await render_next()
+            return
+        work.frame = work.frame.child(value if value else _SKIPPED_SECTION_MARKER)
+
+    async def _render_partial(
+        self,
+        key: str,
+        work: _RenderWork[Awaitable[None]],
+        active: list[_RenderWork[Awaitable[None]]],
+    ) -> None:
         config = self.config
         dynamic = key.startswith("*")
-        name = _partial_name(key, frame, self.policy, config.logger)
+        name = _partial_name(key, work.frame, self.policy, config.logger)
         if name is None:
-            return ""
+            return
         try:
             partial = config.partials_dict[name]
             if dynamic:
@@ -309,56 +375,80 @@ class AsyncChevronRender:
                 config.logger,
                 dynamic=dynamic,
             )
-        left = output.rpartition("\n")[2]
-        padding = frame.padding + left if left.isspace() else frame.padding
-        child = frame.with_context(config.default_delimiters, padding)
-        result = await self.render(partial, child)
-        return result.rstrip(" \t") if left.isspace() else result
+        left = work.partial_padding()
+        padding = work.frame.padding + left if left.isspace() else work.frame.padding
+        child = work.frame.with_context(config.default_delimiters, padding)
 
-    async def render_tokens(self, tokens: TokenIterator, frame: _RenderFrame) -> str:
-        output = ""
-        delimiters = frame.delimiters
-        for index, token in enumerate(tokens):
-            if index and index % 64 == 0:
-                await anyio.lowlevel.checkpoint()
-            tag, key = token[:2]
-            current_scope = frame.scope
-            if tag == "end":
-                if frame.parent is not None:
-                    frame = frame.parent
-                continue
-            if tag == "set delimiter":
-                delimiters = _changed_delimiters(key)
-                continue
-            if current_scope is _SKIPPED_SECTION_MARKER and frame.parent is not None:
-                if tag in ("section", "inverted section"):
-                    frame = frame.child(_SKIPPED_SECTION_MARKER)
-                continue
+        def append_partial(result: str) -> None:
+            work.append(result.rstrip(" \t") if left.isspace() else result)
 
-            match tag:
-                case "literal":
-                    output += key.replace("\n", "\n" + frame.padding)
-                case "variable" | "no escape":
-                    value = await self.interpolation(key, frame)
-                    text = value if isinstance(value, str) else str(value)
-                    output += _html_escape(text) if tag == "variable" else text
-                case "section":
-                    result, delimiters, frame = await self.render_section(
-                        key, tokens, frame, delimiters
-                    )
-                    output += result
-                case "inverted section":
-                    value, _ = self.policy.resolve(
-                        key, frame, lambda value: _normalise_value(key, value)
-                    )
-                    frame = frame.child(
-                        _INVERTED_SECTION_MARKER
-                        if not value
-                        else _SKIPPED_SECTION_MARKER
-                    )
-                case "partial":
-                    output += await self.render_partial(key, frame, output)
-        return output
+        async def append_partial_result(result: str) -> None:
+            append_partial(result)
+
+        _push_work(
+            active,
+            await self._template_work(partial, child, append_partial_result),
+        )
+
+    async def _render_token(
+        self,
+        work: _RenderWork[Awaitable[None]],
+        token: Token,
+        active: list[_RenderWork[Awaitable[None]]],
+    ) -> None:
+        tag, key = token[:2]
+        if _apply_control_token(work, tag, key):
+            return
+
+        match tag:
+            case "literal":
+                work.append(key.replace("\n", "\n" + work.frame.padding))
+            case "variable" | "no escape":
+                await self._render_interpolation(key, tag, work, active)
+            case "section":
+                await self._render_section(key, work, active)
+            case "inverted section":
+                value, _ = self.policy.resolve(
+                    key, work.frame, lambda value: _normalise_value(key, value)
+                )
+                work.frame = work.frame.child(
+                    _INVERTED_SECTION_MARKER if not value else _SKIPPED_SECTION_MARKER
+                )
+            case "partial":
+                await self._render_partial(key, work, active)
+
+    async def _render_interpolation(
+        self,
+        key: str,
+        tag: str,
+        work: _RenderWork[Awaitable[None]],
+        active: list[_RenderWork[Awaitable[None]]],
+    ) -> None:
+        value, explicit = self.resolve(key, work.frame)
+
+        def append_value(result: TemplateData) -> None:
+            work.append(_interpolation_text(result, tag))
+
+        if not isinstance(value, Callable):
+            append_value(value)
+            return
+        protocol = _lambda_protocol(value, "interpolation")
+        self.config.logger.debug(
+            "Selected %s lambda protocol for '%s'", protocol or "unsupported", key
+        )
+        if protocol == _FUNCTION_PROTOCOL:
+            result_frame = work.frame.with_context(self.config.default_delimiters, "")
+
+            async def append_result(result: str) -> None:
+                append_value(result)
+
+            await self._schedule_result(
+                value(), key, result_frame, active, append_result
+            )
+        elif explicit or isinstance(value, _LambdaDefinition):
+            append_value("")
+        else:
+            append_value(value)
 
 
 async def async_render(

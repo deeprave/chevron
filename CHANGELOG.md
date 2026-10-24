@@ -14,6 +14,7 @@ All notable changes to Chevron are documented in this file.
 
 ### Changed
 
+- Finite engine-owned chains of partials and lambda results now render without Python call-stack recursion. Chevron rejects cyclic engine-owned expansion with a bounded `RecursionError`; recursion initiated by application compatibility callbacks remains caller-controlled.
 - A partial name beginning with `*` is now a dynamic selector; Chevron no
   longer treats `{{>*name}}` as a literal partial named `*name`.
 - Renderer scope traversal now uses private immutable frames, so sections and
