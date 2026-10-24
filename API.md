@@ -119,7 +119,7 @@ Omit `lambdas` to retain the legacy compatibility behaviour for existing two-arg
 
 Chevron renders finite engine-owned chains of partials and lambda results without relying on Python's call-stack depth. This includes deeply nested partials and templates returned by `@chevron.func` or `@chevron.section` callbacks.
 
-This guarantee does not apply when application code recursively calls the `render()` helper supplied to `@chevron.compat`. That recursion is controlled by the callback and continues to use the host call stack. Cyclic engine-owned expansion is rejected with a bounded `RecursionError` rather than consuming unbounded memory.
+This guarantee does not apply when application code recursively calls the `render()` helper supplied to `@chevron.compat`. That recursion is controlled by the callback and continues to use the host call stack. Chevron caps active engine-owned work at 10,000 records; exceeding that finite safety bound, including through a cycle, raises `RecursionError` rather than consuming unbounded memory.
 
 ## Async rendering
 

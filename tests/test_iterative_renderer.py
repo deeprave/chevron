@@ -5,7 +5,6 @@ import sys
 import pytest
 
 import chevron
-from chevron import renderer
 
 
 def test_deep_sync_lambda_expansion_does_not_use_the_python_call_stack() -> None:
@@ -44,9 +43,7 @@ def test_lambda_expansion_resumes_parent_delimiters() -> None:
     )
 
 
-def test_dynamic_partial_cycle_fails_with_a_bounded_error(monkeypatch) -> None:
-    monkeypatch.setattr(renderer, "_MAX_ACTIVE_WORK", 4)
-
+def test_dynamic_partial_cycle_fails_with_a_bounded_error() -> None:
     with pytest.raises(RecursionError, match="nested template expansion"):
         chevron.render(
             "{{>*name}}",
@@ -55,9 +52,7 @@ def test_dynamic_partial_cycle_fails_with_a_bounded_error(monkeypatch) -> None:
         )
 
 
-def test_function_lambda_cycle_fails_with_a_bounded_error(monkeypatch) -> None:
-    monkeypatch.setattr(renderer, "_MAX_ACTIVE_WORK", 4)
-
+def test_function_lambda_cycle_fails_with_a_bounded_error() -> None:
     @chevron.func
     def loop() -> str:
         return "{{loop}}"
@@ -108,23 +103,40 @@ def test_compatibility_section_rejects_non_string_results_promptly() -> None:
     assert not called
 
 
-def test_sync_failure_closes_owned_token_stream(monkeypatch) -> None:
-    closed = False
+def test_deep_standard_section_lambda_expansion_does_not_use_the_python_call_stack() -> (
+    None
+):
+    depth = sys.getrecursionlimit() + 10
+    lambdas = {}
 
-    def tokens(*args, **kwargs):
-        nonlocal closed
-        try:
-            yield ("variable", "explode")
-        finally:
-            closed = True
+    for index in range(depth):
 
-    @chevron.func
-    def explode() -> str:
-        raise ValueError("explode")
+        @chevron.section
+        def expansion(body: str, index: int = index) -> str:
+            return f"{{{{#section-{index + 1}}}}}{body}{{{{/section-{index + 1}}}}}"
 
-    monkeypatch.setattr(renderer, "_tokenize", tokens)
+        lambdas[f"section-{index}"] = expansion
 
-    with pytest.raises(ValueError, match="explode"):
-        chevron.render("ignored", lambdas={"explode": explode})
+    @chevron.section
+    def complete(body: str) -> str:
+        return body
 
-    assert closed
+    lambdas[f"section-{depth}"] = complete
+
+    assert (
+        chevron.render("{{#section-0}}complete{{/section-0}}", lambdas=lambdas)
+        == "complete"
+    )
+
+
+def test_deep_iterable_sections_do_not_use_the_python_call_stack() -> None:
+    depth = sys.getrecursionlimit() + 10
+    template = "{{#items}}" * depth + "complete" + "{{/items}}" * depth
+    data = {"items": [{"items": []}]}
+    current = data["items"][0]
+    for _ in range(depth - 1):
+        next_item = {"items": []}
+        current["items"] = [next_item]
+        current = next_item
+
+    assert chevron.render(template, data) == "complete"

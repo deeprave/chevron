@@ -14,9 +14,15 @@ All notable changes to Chevron are documented in this file.
 
 ### Changed
 
-- Finite engine-owned chains of partials and lambda results now render without Python call-stack recursion. Chevron rejects cyclic engine-owned expansion with a bounded `RecursionError`; recursion initiated by application compatibility callbacks remains caller-controlled.
-- A partial name beginning with `*` is now a dynamic selector; Chevron no
-  longer treats `{{>*name}}` as a literal partial named `*name`.
+- The renderer now drives engine-owned nested partials, iterable sections, and
+  lambda results iteratively. This preserves existing rendering semantics while
+  safely supporting finite nesting beyond Python's call-stack depth; cyclic
+  engine-owned expansion raises a bounded `RecursionError`. Recursion initiated
+  by application compatibility callbacks remains caller-controlled.
+- To support Mustache dynamic partial names, a partial name beginning with `*`
+  is now a deferred selector; Chevron no longer treats `{{>*name}}` as a
+  literal partial named `*name`. This small compatibility break is required by
+  the current Mustache syntax and is expected to affect few templates.
 - Renderer scope traversal now uses private immutable frames, so sections and
   nested renders never structurally mutate a caller-provided `scopes` sequence.
 - The internal tokenizer now accepts source text only. Direct callers that supply file-like objects receive a `TypeError`; `chevron.render()` continues to accept file-like templates. Moving input I/O to the renderer boundary prepares the package for async rendering.

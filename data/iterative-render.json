@@ -1,0 +1,895 @@
+{
+  "metadata": {
+    "commit": "b1b7b1dc22fb0e83144ddff2146633169ca94160",
+    "dirty": true,
+    "python": "3.11.16 (main, Sep  1 2026, 14:08:22) [Clang 22.1.3 ]",
+    "implementation": "CPython",
+    "platform": "macOS-27.0.1-arm64-arm-64bit",
+    "parameters": {
+      "warm": 3,
+      "samples": 10,
+      "sample_milliseconds": 100
+    },
+    "started_at": "2026-10-24T07:16:42.524087+00:00",
+    "completed_at": "2026-10-24T07:17:23.110338+00:00",
+    "elapsed_seconds": 40.586251
+  },
+  "legend": {
+    "list-section": "4 mapped comment rows",
+    "explicit-empty-policy": "4 rows with empty explicit lambdas",
+    "mapped-partial": "Mapped partial",
+    "compatibility-section-lambda-permissive": "compatibility section lambda (permissive)",
+    "function-interpolation-lambda-permissive": "function interpolation lambda (permissive)",
+    "standard-section-lambda-permissive": "standard section lambda (permissive)",
+    "nested-compatibility-lambda-permissive": "nested compatibility lambda (permissive)",
+    "compatibility-section-lambda-explicit": "compatibility section lambda (explicit)",
+    "function-interpolation-lambda-explicit": "function interpolation lambda (explicit)",
+    "standard-section-lambda-explicit": "standard section lambda (explicit)",
+    "nested-compatibility-lambda-explicit": "nested compatibility lambda (explicit)",
+    "partial-chain": "100 nested partials",
+    "function-lambda-chain": "100 nested function lambdas",
+    "flat-partials": "200 flat partial tags",
+    "large-list-section": "1,000 section rows"
+  },
+  "sync": {
+    "list-section": {
+      "iterations": 3194,
+      "samples_milliseconds": [
+        92.80450000005658,
+        95.1464580002721,
+        91.17266700013715,
+        90.56391600006464,
+        89.64212499995483,
+        90.71412499997678,
+        91.52795800036984,
+        90.49633399990853,
+        90.83833400018193,
+        90.28204100013681
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.02842086083283637,
+        "sample_standard_deviation_milliseconds_per_render": 0.0004967062249421992
+      }
+    },
+    "explicit-empty-policy": {
+      "iterations": 3048,
+      "samples_milliseconds": [
+        103.06987500007381,
+        105.11945899997954,
+        113.09112500021001,
+        97.53799999998591,
+        96.29812500043045,
+        96.75037499982864,
+        96.58624999974563,
+        95.68920899982913,
+        96.62233299968648,
+        97.17287500006933
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.031811556758513444,
+        "sample_standard_deviation_milliseconds_per_render": 0.001851240448125335
+      }
+    },
+    "mapped-partial": {
+      "iterations": 11645,
+      "samples_milliseconds": [
+        77.48950000041077,
+        77.76308300071832,
+        77.12916700074857,
+        81.93879200007359,
+        79.84733300054359,
+        76.93799999924522,
+        77.5575839998055,
+        77.73674999953073,
+        77.38891700046224,
+        77.55491599982633
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.0066600472305552525,
+        "sample_standard_deviation_milliseconds_per_render": 0.00013360529514234995
+      }
+    },
+    "compatibility-section-lambda-permissive": {
+      "iterations": 10463,
+      "samples_milliseconds": [
+        81.63150000018504,
+        81.16699999936827,
+        81.09033300024748,
+        80.92099999976199,
+        80.84570800019719,
+        80.62137500019162,
+        80.34495799984143,
+        80.94304200039915,
+        80.4811250000057,
+        80.63295900046796
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.0077304170887871155,
+        "sample_standard_deviation_milliseconds_per_render": 3.5902696387281455e-05
+      }
+    },
+    "function-interpolation-lambda-permissive": {
+      "iterations": 12514,
+      "samples_milliseconds": [
+        86.15254100004677,
+        86.38520800013794,
+        86.11887499955628,
+        86.31912500004546,
+        86.15920900047058,
+        86.35904200036748,
+        86.32270799989783,
+        86.02566700028547,
+        85.23183299985249,
+        86.36320900041028
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.006891414975248363,
+        "sample_standard_deviation_milliseconds_per_render": 2.7451043003286162e-05
+      }
+    },
+    "standard-section-lambda-permissive": {
+      "iterations": 9765,
+      "samples_milliseconds": [
+        81.09866699942359,
+        81.3502500004688,
+        81.28970799953095,
+        81.05683299982047,
+        80.72875000016211,
+        80.86137499958568,
+        82.0897089997743,
+        81.04108400038967,
+        81.4051669995024,
+        80.55724999940139
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.008302892985112343,
+        "sample_standard_deviation_milliseconds_per_render": 4.3755063494345724e-05
+      }
+    },
+    "nested-compatibility-lambda-permissive": {
+      "iterations": 7919,
+      "samples_milliseconds": [
+        93.17316699980438,
+        93.7117080002281,
+        93.23983299964311,
+        93.80112500002724,
+        93.92833399942901,
+        93.05704200050968,
+        92.93950000028417,
+        93.93154200006393,
+        93.93741700023384,
+        93.96474999994098
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.011839426253330934,
+        "sample_standard_deviation_milliseconds_per_render": 5.241460216330321e-05
+      }
+    },
+    "compatibility-section-lambda-explicit": {
+      "iterations": 10915,
+      "samples_milliseconds": [
+        89.77633399990737,
+        88.26941600000282,
+        87.34508299949084,
+        87.50187500027096,
+        87.65541699995083,
+        87.71687500029657,
+        87.56162500048958,
+        87.51616599965928,
+        87.74737500061747,
+        87.70066600027349
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.008032802702712977,
+        "sample_standard_deviation_milliseconds_per_render": 6.505146066993823e-05
+      }
+    },
+    "function-interpolation-lambda-explicit": {
+      "iterations": 12526,
+      "samples_milliseconds": [
+        91.17183300077158,
+        90.94362500036368,
+        90.86741600003734,
+        90.5070409999098,
+        90.16966600029264,
+        90.97966699937388,
+        91.13079100006871,
+        90.9163329997682,
+        90.77520899973024,
+        91.21945800052345
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.007259298978130763,
+        "sample_standard_deviation_milliseconds_per_render": 2.5690509658379203e-05
+      }
+    },
+    "standard-section-lambda-explicit": {
+      "iterations": 10495,
+      "samples_milliseconds": [
+        90.82054200007406,
+        90.96766699985892,
+        88.8781250005195,
+        90.08141600043018,
+        89.92899999975634,
+        89.60770799967577,
+        90.2883329999895,
+        90.5338339998707,
+        90.43724999992264,
+        90.0179999998727
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.008593127632225807,
+        "sample_standard_deviation_milliseconds_per_render": 5.8128257193611856e-05
+      }
+    },
+    "nested-compatibility-lambda-explicit": {
+      "iterations": 7273,
+      "samples_milliseconds": [
+        86.89179200064245,
+        86.89233299992338,
+        86.61879200008116,
+        86.24699999927543,
+        86.02241599965055,
+        86.42679199965642,
+        86.77170800001477,
+        86.88162499947794,
+        86.36345800005074,
+        85.9803749999628
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.011896437783565073,
+        "sample_standard_deviation_milliseconds_per_render": 4.863730160400518e-05
+      }
+    },
+    "partial-chain": {
+      "iterations": 234,
+      "samples_milliseconds": [
+        62.22695899941755,
+        63.28808299986122,
+        63.11291700058064,
+        63.42729100015276,
+        62.725249999857624,
+        63.756124999599706,
+        64.1643330000079,
+        63.35316599961516,
+        62.443083000289334,
+        63.41841699941142
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.27060095940059053,
+        "sample_standard_deviation_milliseconds_per_render": 0.0025168928643360153
+      }
+    },
+    "function-lambda-chain": {
+      "iterations": 313,
+      "samples_milliseconds": [
+        102.8871660000732,
+        102.59416699955182,
+        101.49687499961146,
+        102.62466600033804,
+        102.02183399997011,
+        102.53287500017905,
+        112.05683299976954,
+        109.98962499979825,
+        101.8752919999315,
+        102.89704200022243
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.3278256118209103,
+        "sample_standard_deviation_milliseconds_per_render": 0.011852287639260717
+      }
+    },
+    "flat-partials": {
+      "iterations": 151,
+      "samples_milliseconds": [
+        98.26416699979745,
+        96.8817079992732,
+        96.37383399967803,
+        96.54058399974019,
+        96.52983399973891,
+        96.56737499972223,
+        98.7780000004932,
+        96.42387500025507,
+        96.29704199960543,
+        96.67983399958757
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.6394303278127895,
+        "sample_standard_deviation_milliseconds_per_render": 0.0057008729830199
+      }
+    },
+    "large-list-section": {
+      "iterations": 56,
+      "samples_milliseconds": [
+        101.06858299968735,
+        101.66641700016044,
+        101.90170900023077,
+        101.24850000011065,
+        101.09866600032547,
+        101.59883300002548,
+        101.76524999951653,
+        101.29362499992567,
+        101.84566699990683,
+        101.79262500059849
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 1.8148683035730886,
+        "sample_standard_deviation_milliseconds_per_render": 0.005707786560815158
+      }
+    }
+  },
+  "asyncio": {
+    "list-section": {
+      "iterations": 1786,
+      "samples_milliseconds": [
+        93.40100000008533,
+        94.8363329998756,
+        92.87054099968373,
+        90.56725000027654,
+        91.59333300067374,
+        92.43774999958987,
+        90.66270799939957,
+        92.57383400017716,
+        93.76158400027634,
+        89.8713750002571
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.051794956326922464,
+        "sample_standard_deviation_milliseconds_per_render": 0.0008806337329243378
+      }
+    },
+    "explicit-empty-policy": {
+      "iterations": 1604,
+      "samples_milliseconds": [
+        88.53145800003404,
+        89.17783400011103,
+        88.01270899948577,
+        88.31837500019901,
+        89.61683300003642,
+        89.66179100025329,
+        88.61962499941001,
+        87.65149999999267,
+        86.90808299979835,
+        88.55104199938069
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.05520028054844599,
+        "sample_standard_deviation_milliseconds_per_render": 0.0005338342865370053
+      }
+    },
+    "mapped-partial": {
+      "iterations": 3259,
+      "samples_milliseconds": [
+        79.65424999929382,
+        78.72204199975386,
+        77.55283300048177,
+        76.15624999925785,
+        76.5434169998116,
+        76.99741699980223,
+        75.91225000032864,
+        76.4877499996146,
+        76.53704200038192,
+        75.16979100000754
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.023485802239980594,
+        "sample_standard_deviation_milliseconds_per_render": 0.0004121671755045449
+      }
+    },
+    "compatibility-section-lambda-permissive": {
+      "iterations": 2207,
+      "samples_milliseconds": [
+        89.46520900008181,
+        86.44462499978545,
+        86.62579100018775,
+        87.07116700043116,
+        85.72566600014397,
+        86.81412500027363,
+        86.09262499976467,
+        86.9258330003504,
+        88.7880000000223,
+        90.2164580002136
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.03936111418228909,
+        "sample_standard_deviation_milliseconds_per_render": 0.0006891907722676817
+      }
+    },
+    "function-interpolation-lambda-permissive": {
+      "iterations": 3556,
+      "samples_milliseconds": [
+        90.59562499987805,
+        85.0789159994747,
+        84.36683299987635,
+        83.4097089991701,
+        82.90175000001909,
+        84.93320799971116,
+        83.656042000257,
+        84.57129199996416,
+        85.83970900053828,
+        84.54187500046828
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.023778566788587238,
+        "sample_standard_deviation_milliseconds_per_render": 0.0006042898361033191
+      }
+    },
+    "standard-section-lambda-permissive": {
+      "iterations": 3041,
+      "samples_milliseconds": [
+        76.44700000037119,
+        76.62858399999095,
+        77.79225000012957,
+        77.19604199974128,
+        77.99483300004795,
+        78.49445899955754,
+        77.14408299943898,
+        77.10012500047014,
+        77.74820800023008,
+        77.48050000009243
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.025431854981886503,
+        "sample_standard_deviation_milliseconds_per_render": 0.00020604623529408577
+      }
+    },
+    "nested-compatibility-lambda-permissive": {
+      "iterations": 1524,
+      "samples_milliseconds": [
+        92.25241600051959,
+        91.43404099995678,
+        91.32845899966924,
+        92.36408300057519,
+        92.054083000221,
+        92.67245799946977,
+        92.98708400001487,
+        92.26704200045788,
+        90.95762499964621,
+        90.56441700067808
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.06046801148318261,
+        "sample_standard_deviation_milliseconds_per_render": 0.0005125164624341602
+      }
+    },
+    "compatibility-section-lambda-explicit": {
+      "iterations": 2309,
+      "samples_milliseconds": [
+        94.20204100024421,
+        93.30950000003213,
+        93.67566699984309,
+        91.92558399990958,
+        94.97499999997672,
+        93.00408299986884,
+        93.4813750000103,
+        94.21587500037276,
+        92.08662499986531,
+        94.15912499935075
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.04052772672149273,
+        "sample_standard_deviation_milliseconds_per_render": 0.00041853047182955483
+      }
+    },
+    "function-interpolation-lambda-explicit": {
+      "iterations": 3410,
+      "samples_milliseconds": [
+        84.27374999973836,
+        84.24395800011553,
+        82.5040829995487,
+        82.59125000040513,
+        81.4505830003327,
+        81.29412499965838,
+        81.57800000026327,
+        81.86508299968409,
+        84.8731249998309,
+        82.83312500043394
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.024207526832837806,
+        "sample_standard_deviation_milliseconds_per_render": 0.0003800855578024232
+      }
+    },
+    "standard-section-lambda-explicit": {
+      "iterations": 3008,
+      "samples_milliseconds": [
+        77.535500000522,
+        76.73004100070102,
+        78.44254099927639,
+        80.17808299973694,
+        79.58087499991962,
+        80.45683300042583,
+        80.41562499965949,
+        80.30633299949841,
+        79.90491700002167,
+        80.00462499967398
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.026580708444098343,
+        "sample_standard_deviation_milliseconds_per_render": 0.00043951304985798134
+      }
+    },
+    "nested-compatibility-lambda-explicit": {
+      "iterations": 1317,
+      "samples_milliseconds": [
+        84.11708299991005,
+        83.42162500048289,
+        81.66479200008325,
+        79.64775000073132,
+        80.14545900005032,
+        78.3709170000293,
+        79.49537499916914,
+        79.50862500001676,
+        79.99158399979933,
+        80.54870900014066
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.06079614388756631,
+        "sample_standard_deviation_milliseconds_per_render": 0.0013920148640839082
+      }
+    },
+    "partial-chain": {
+      "iterations": 271,
+      "samples_milliseconds": [
+        105.36941700047464,
+        105.32891699949687,
+        105.1398749996224,
+        107.43029100012791,
+        104.95224999976926,
+        105.87316600049235,
+        106.07941699981893,
+        104.59995900055219,
+        104.97550000036426,
+        106.4526250002018
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.388742313653084,
+        "sample_standard_deviation_milliseconds_per_render": 0.0031420422417789678
+      }
+    },
+    "function-lambda-chain": {
+      "iterations": 224,
+      "samples_milliseconds": [
+        104.46570800013433,
+        100.7620410000527,
+        104.72154099988984,
+        103.67041700010304,
+        101.46520899979805,
+        103.46216699963406,
+        102.61404099946958,
+        102.80566699930205,
+        100.82708300069498,
+        102.93033300058596
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.4592321428568929,
+        "sample_standard_deviation_milliseconds_per_render": 0.006231252460821017
+      }
+    },
+    "flat-partials": {
+      "iterations": 100,
+      "samples_milliseconds": [
+        98.3421669998279,
+        99.47195799941255,
+        100.94883299916546,
+        98.76758300015354,
+        98.72958299911261,
+        100.00258299987763,
+        101.2248749993887,
+        98.69645800063154,
+        100.02645799977472,
+        98.15258399976301
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.9911977049978304,
+        "sample_standard_deviation_milliseconds_per_render": 0.010799198692232032
+      }
+    },
+    "large-list-section": {
+      "iterations": 35,
+      "samples_milliseconds": [
+        102.33700000026147,
+        102.86920900034602,
+        105.30820799976937,
+        102.93462499976158,
+        103.79570800068905,
+        101.98970900000859,
+        102.32475000066188,
+        102.67074999956094,
+        103.54816600010963,
+        102.81312499955675
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 2.9383190571414683,
+        "sample_standard_deviation_milliseconds_per_render": 0.027450109220257465
+      }
+    }
+  },
+  "trio": {
+    "list-section": {
+      "iterations": 1068,
+      "samples_milliseconds": [
+        55.46158399920387,
+        59.52841599992098,
+        55.56083299961756,
+        58.135666999987734,
+        58.010125000691914,
+        57.63862500043615,
+        55.667333000201324,
+        56.82704100036062,
+        56.46787499972561,
+        55.681166999420384
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.05304069101127633,
+        "sample_standard_deviation_milliseconds_per_render": 0.00129714707057974
+      }
+    },
+    "explicit-empty-policy": {
+      "iterations": 1462,
+      "samples_milliseconds": [
+        83.48304199989798,
+        80.72316699963267,
+        83.38879100028862,
+        83.23954200022854,
+        82.1387500000128,
+        82.68991699969774,
+        82.27362499928859,
+        83.47604099981254,
+        80.93879199986986,
+        81.45458300077735
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.05641708002701311,
+        "sample_standard_deviation_milliseconds_per_render": 0.0007216642486618434
+      }
+    },
+    "mapped-partial": {
+      "iterations": 3457,
+      "samples_milliseconds": [
+        86.08962499965855,
+        85.30116699967039,
+        84.28358299988759,
+        85.40816700042342,
+        84.9995829994441,
+        86.20020899979863,
+        85.16262499961158,
+        85.63641700038715,
+        85.87937500033149,
+        87.17658399928041
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.024738875325543905,
+        "sample_standard_deviation_milliseconds_per_render": 0.00022764632327406778
+      }
+    },
+    "compatibility-section-lambda-permissive": {
+      "iterations": 2227,
+      "samples_milliseconds": [
+        91.79216699976678,
+        94.11174999968352,
+        92.82645900020725,
+        93.13666700018075,
+        93.66604200022266,
+        91.96316599991405,
+        92.50504200008436,
+        91.8729169998187,
+        93.02050000042072,
+        92.89454099962313
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.04169757521325334,
+        "sample_standard_deviation_milliseconds_per_render": 0.00034459742476739035
+      }
+    },
+    "function-interpolation-lambda-permissive": {
+      "iterations": 3660,
+      "samples_milliseconds": [
+        92.1360000002096,
+        93.22420900025463,
+        92.45487499993033,
+        92.30212500006019,
+        92.09533300054318,
+        92.26745900014066,
+        90.88241700010258,
+        92.44733300056396,
+        92.9822090001835,
+        91.39641700039647
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.025214424043743286,
+        "sample_standard_deviation_milliseconds_per_render": 0.0001865418313126032
+      }
+    },
+    "standard-section-lambda-permissive": {
+      "iterations": 3651,
+      "samples_milliseconds": [
+        97.65400000014779,
+        95.82299999965471,
+        96.26858299998275,
+        95.70458400048665,
+        95.98529199956829,
+        95.6907500003581,
+        95.77524999986053,
+        94.52820800015616,
+        94.4417919999978,
+        95.2166249999209
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.026222929882271595,
+        "sample_standard_deviation_milliseconds_per_render": 0.0002489096440597861
+      }
+    },
+    "nested-compatibility-lambda-permissive": {
+      "iterations": 1545,
+      "samples_milliseconds": [
+        96.67762499975652,
+        94.79870899940579,
+        97.79224999965663,
+        97.39499999977852,
+        96.02158300003794,
+        97.9817080005887,
+        97.26912499991158,
+        96.01225000005797,
+        95.25954200034903,
+        96.22054199917329
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.06242659126178958,
+        "sample_standard_deviation_milliseconds_per_render": 0.000690707770312682
+      }
+    },
+    "compatibility-section-lambda-explicit": {
+      "iterations": 2018,
+      "samples_milliseconds": [
+        88.59195799959707,
+        82.79795900034514,
+        82.9637079996246,
+        82.82087499992485,
+        82.95420899958117,
+        81.72504200047115,
+        84.4258750003064,
+        82.93337499981135,
+        83.66629100055434,
+        82.62187500076834
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.04110197819608338,
+        "sample_standard_deviation_milliseconds_per_render": 0.0009426851318698805
+      }
+    },
+    "function-interpolation-lambda-explicit": {
+      "iterations": 3561,
+      "samples_milliseconds": [
+        88.31183399979636,
+        87.90750000025582,
+        90.66104200064729,
+        90.96812499956286,
+        88.77829199991538,
+        88.39724999961618,
+        88.3319999993546,
+        89.67554199989536,
+        90.6875829996352,
+        91.21362499990937
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.02505670233077938,
+        "sample_standard_deviation_milliseconds_per_render": 0.0003616850037840975
+      }
+    },
+    "standard-section-lambda-explicit": {
+      "iterations": 3045,
+      "samples_milliseconds": [
+        83.59033400029148,
+        83.1483339998158,
+        84.26650000001246,
+        84.21791599994322,
+        82.98500000000786,
+        82.6160409997101,
+        83.36916600001132,
+        83.36624999992637,
+        83.68491700002778,
+        83.96600000014587
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.027415353037816552,
+        "sample_standard_deviation_milliseconds_per_render": 0.00017526306566809183
+      }
+    },
+    "nested-compatibility-lambda-explicit": {
+      "iterations": 1424,
+      "samples_milliseconds": [
+        88.40725000027305,
+        89.34737499930634,
+        90.42708400011179,
+        89.40041599998949,
+        89.10216699950979,
+        88.53833400007716,
+        88.66895899973315,
+        88.99029199983488,
+        88.30966599998646,
+        87.34137499959616
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.06238035498580338,
+        "sample_standard_deviation_milliseconds_per_render": 0.0005740769785513536
+      }
+    },
+    "partial-chain": {
+      "iterations": 268,
+      "samples_milliseconds": [
+        104.67137499927048,
+        105.23154100064858,
+        104.522542000268,
+        106.39466700013145,
+        104.34933399938018,
+        105.92312500011758,
+        103.03341700000601,
+        104.11079100049392,
+        105.65562499959924,
+        105.65683299955708
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.39160991791029676,
+        "sample_standard_deviation_milliseconds_per_render": 0.0037539306670650177
+      }
+    },
+    "function-lambda-chain": {
+      "iterations": 214,
+      "samples_milliseconds": [
+        99.49966600015614,
+        98.47695799999201,
+        96.70570799971756,
+        99.63208399949508,
+        98.26700000030542,
+        100.94095799922798,
+        99.26308400008566,
+        96.50133299965091,
+        99.80145800000173,
+        99.1732080001384
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.46363619626220576,
+        "sample_standard_deviation_milliseconds_per_render": 0.00645502574733139
+      }
+    },
+    "flat-partials": {
+      "iterations": 101,
+      "samples_milliseconds": [
+        100.57799999958661,
+        97.51195900025778,
+        98.57174999979179,
+        97.8979999999865,
+        98.8645830002497,
+        98.70495799987111,
+        97.81766699961736,
+        97.07970900035434,
+        97.8064999999333,
+        97.61133399933897
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 0.9688894405920982,
+        "sample_standard_deviation_milliseconds_per_render": 0.009866378177192929
+      }
+    },
+    "large-list-section": {
+      "iterations": 36,
+      "samples_milliseconds": [
+        103.85887500069657,
+        103.1412080001246,
+        106.21266699945409,
+        108.22920800001157,
+        107.36458300016238,
+        107.40833299951191,
+        108.32275000029767,
+        106.67379200003779,
+        107.06091700012621,
+        107.25012499915465
+      ],
+      "statistics": {
+        "median_milliseconds_per_render": 2.976542249990012,
+        "sample_standard_deviation_milliseconds_per_render": 0.048205946883294506
+      }
+    }
+  }
+}

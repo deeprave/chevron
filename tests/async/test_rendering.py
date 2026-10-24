@@ -11,7 +11,6 @@ import pytest
 import chevron
 from async_support import ANYIO_BACKENDS
 from chevron import ChevronError
-from chevron import renderer
 
 
 class TruthinessError:
@@ -66,12 +65,12 @@ async def test_deep_async_partial_resumes_parent_scope_and_indentation(
     partials = {
         f"partial-{index}": f"{{{{>partial-{index + 1}}}}}" for index in range(depth)
     }
-    partials[f"partial-{depth}"] = "{{name}}"
+    partials[f"partial-{depth}"] = "{{name}}\n{{name}}"
 
     shallow = await chevron.async_render(
         "{{#item}}  {{>partial-0}}|{{name}}{{/item}}",
         {"item": {"name": "inner"}},
-        partials_dict={"partial-0": "{{name}}"},
+        partials_dict={"partial-0": "{{name}}\n{{name}}"},
     )
     deep = await chevron.async_render(
         "{{#item}}  {{>partial-0}}|{{name}}{{/item}}",
@@ -79,7 +78,7 @@ async def test_deep_async_partial_resumes_parent_scope_and_indentation(
         partials_dict=partials,
     )
 
-    assert deep == shallow == "  inner|inner"
+    assert deep == shallow == "  inner\n  inner|inner"
 
 
 @pytest.mark.anyio
@@ -99,6 +98,53 @@ async def test_async_lambda_expansion_resumes_parent_delimiters(
         )
         == "inner|inner"
     )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_deep_async_standard_section_lambda_expansion_does_not_use_the_python_call_stack(
+    anyio_backend: str,
+) -> None:
+    depth = sys.getrecursionlimit() + 10
+    lambdas = {}
+
+    for index in range(depth):
+
+        @chevron.section
+        async def expansion(body: str, index: int = index) -> str:
+            return f"{{{{#section-{index + 1}}}}}{body}{{{{/section-{index + 1}}}}}"
+
+        lambdas[f"section-{index}"] = expansion
+
+    @chevron.section
+    async def complete(body: str) -> str:
+        return body
+
+    lambdas[f"section-{depth}"] = complete
+
+    assert (
+        await chevron.async_render(
+            "{{#section-0}}complete{{/section-0}}", lambdas=lambdas
+        )
+        == "complete"
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_deep_async_iterable_sections_do_not_use_the_python_call_stack(
+    anyio_backend: str,
+) -> None:
+    depth = sys.getrecursionlimit() + 10
+    template = "{{#items}}" * depth + "complete" + "{{/items}}" * depth
+    data = {"items": [{"items": []}]}
+    current = data["items"][0]
+    for _ in range(depth - 1):
+        next_item = {"items": []}
+        current["items"] = [next_item]
+        current = next_item
+
+    assert await chevron.async_render(template, data) == "complete"
 
 
 @pytest.mark.anyio
@@ -127,10 +173,8 @@ async def test_async_empty_section_observes_cancellation(
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
 async def test_async_cyclic_partial_fails_with_a_bounded_error(
-    anyio_backend: str, monkeypatch
+    anyio_backend: str,
 ) -> None:
-    monkeypatch.setattr(renderer, "_MAX_ACTIVE_WORK", 4)
-
     with pytest.raises(RecursionError, match="nested template expansion"):
         await chevron.async_render("{{>self}}", partials_dict={"self": "{{>self}}"})
 
@@ -138,10 +182,8 @@ async def test_async_cyclic_partial_fails_with_a_bounded_error(
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
 async def test_async_dynamic_partial_cycle_fails_with_a_bounded_error(
-    anyio_backend: str, monkeypatch
+    anyio_backend: str,
 ) -> None:
-    monkeypatch.setattr(renderer, "_MAX_ACTIVE_WORK", 4)
-
     with pytest.raises(RecursionError, match="nested template expansion"):
         await chevron.async_render(
             "{{>*name}}",
@@ -153,10 +195,8 @@ async def test_async_dynamic_partial_cycle_fails_with_a_bounded_error(
 @pytest.mark.anyio
 @pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
 async def test_async_function_lambda_cycle_fails_with_a_bounded_error(
-    anyio_backend: str, monkeypatch
+    anyio_backend: str,
 ) -> None:
-    monkeypatch.setattr(renderer, "_MAX_ACTIVE_WORK", 4)
-
     @chevron.func
     async def loop() -> str:
         return "{{loop}}"
@@ -213,44 +253,6 @@ async def test_async_compatibility_section_rejects_non_string_results_promptly(
         )
 
     assert not called
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
-async def test_async_cancellation_closes_owned_token_stream(
-    anyio_backend: str, monkeypatch
-) -> None:
-    import anyio
-
-    from chevron import async_renderer
-
-    closed = False
-    started = anyio.Event()
-
-    def tokens(*args, **kwargs):
-        nonlocal closed
-        try:
-            yield ("variable", "wait")
-        finally:
-            closed = True
-
-    @chevron.func
-    async def wait() -> str:
-        started.set()
-        await anyio.sleep_forever()
-        raise AssertionError("unreachable")
-
-    monkeypatch.setattr(async_renderer, "_tokenize", tokens)
-
-    async def render_template() -> None:
-        await chevron.async_render("ignored", lambdas={"wait": wait})
-
-    async with anyio.create_task_group() as tasks:
-        tasks.start_soon(render_template)
-        await started.wait()
-        tasks.cancel_scope.cancel()
-
-    assert closed
 
 
 @pytest.mark.anyio

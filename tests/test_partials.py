@@ -3,7 +3,6 @@ import sys
 import pytest
 
 import chevron
-from chevron import renderer
 
 
 def test_unicode_partial_content_renders_unchanged() -> None:
@@ -30,12 +29,12 @@ def test_deep_partial_resumes_parent_scope_and_indentation() -> None:
     partials = {
         f"partial-{index}": f"{{{{>partial-{index + 1}}}}}" for index in range(depth)
     }
-    partials[f"partial-{depth}"] = "{{name}}"
+    partials[f"partial-{depth}"] = "{{name}}\n{{name}}"
 
     shallow = chevron.render(
         "{{#item}}  {{>partial-0}}|{{name}}{{/item}}",
         {"item": {"name": "inner"}},
-        partials_dict={"partial-0": "{{name}}"},
+        partials_dict={"partial-0": "{{name}}\n{{name}}"},
     )
     deep = chevron.render(
         "{{#item}}  {{>partial-0}}|{{name}}{{/item}}",
@@ -43,12 +42,10 @@ def test_deep_partial_resumes_parent_scope_and_indentation() -> None:
         partials_dict=partials,
     )
 
-    assert deep == shallow == "  inner|inner"
+    assert deep == shallow == "  inner\n  inner|inner"
 
 
-def test_cyclic_partial_fails_with_a_bounded_error(monkeypatch) -> None:
-    monkeypatch.setattr(renderer, "_MAX_ACTIVE_WORK", 4)
-
+def test_cyclic_partial_fails_with_a_bounded_error() -> None:
     with pytest.raises(RecursionError, match="nested template expansion"):
         chevron.render("{{>self}}", partials_dict={"self": "{{>self}}"})
 
