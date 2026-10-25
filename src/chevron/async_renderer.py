@@ -12,6 +12,7 @@ from .renderer import (
     _END_OF_TOKENS,
     _FUNCTION_PROTOCOL,
     _LambdaDefinition,
+    _MISSING,
     _RenderConfig,
     _RenderFrame,
     _RenderLogger,
@@ -22,15 +23,24 @@ from .renderer import (
     _SKIPPED_SECTION_MARKER,
     _SourcePolicy,
     _SectionBody,
+    _BODY_OPENERS,
     _changed_delimiters,
     _apply_control_token,
     _interpolation_text,
     _close_awaitable,
+    _configured_partial,
     _filesystem_partial_name,
     _filesystem_partial_rejection_reason,
     _lambda_protocol,
     _normalise_value,
     _partial_name,
+    _parent_overrides,
+    _parent_is_standalone,
+    _apply_line_padding,
+    _prepare_block,
+    _restore_enclosing_padding,
+    _consume_parent_suffix,
+    _restore_parent_suffix,
     _push_work,
     _prepare_render_context,
     _read_template_result,
@@ -60,13 +70,14 @@ async def _aget_filesystem_partial(
     logger: _RenderLogger,
     *,
     dynamic: bool = False,
+    kind: str = "partial",
 ) -> str:
     """Load a partial through AnyIO's asynchronous path and file API."""
     if partials_path is None or partials_path == "":
         if dynamic:
-            logger.debug("Dynamic partial was not configured")
+            logger.debug("Dynamic %s was not configured", kind)
         else:
-            logger.debug("Partial '%s' was not configured", name)
+            logger.debug("%s '%s' was not configured", kind.capitalize(), name)
         return ""
 
     try:
@@ -75,9 +86,9 @@ async def _aget_filesystem_partial(
         if partial_name is None:
             reason = _filesystem_partial_rejection_reason(name, partials_ext)
             if dynamic:
-                logger.debug("Rejected dynamic partial reference: %s", reason)
+                logger.debug("Rejected dynamic %s reference: %s", kind, reason)
             else:
-                logger.debug("Rejected partial reference '%s': %s", name, reason)
+                logger.debug("Rejected %s reference '%s': %s", kind, name, reason)
             return ""
 
         partial_path = await (base_path / partial_name).resolve(strict=True)
@@ -89,15 +100,15 @@ async def _aget_filesystem_partial(
             with anyio.CancelScope(shield=True):
                 await partial.aclose()
         if dynamic:
-            logger.debug("Resolved dynamic partial from the configured path")
+            logger.debug("Resolved dynamic %s from the configured path", kind)
         else:
-            logger.debug("Resolved partial '%s' from the configured path", name)
+            logger.debug("Resolved %s '%s' from the configured path", kind, name)
         return content
     except (OSError, RuntimeError, ValueError):
         if dynamic:
-            logger.debug("Dynamic partial was unavailable")
+            logger.debug("Dynamic %s was unavailable", kind)
         else:
-            logger.debug("Partial '%s' was unavailable", name)
+            logger.debug("%s '%s' was unavailable", kind.capitalize(), name)
         return ""
 
 
@@ -140,7 +151,9 @@ class AsyncChevronRender:
         self,
         template: TemplateInput,
         frame: _RenderFrame,
-        continuation: Callable[[str], Awaitable[None]] | None = None,
+        continuation: Callable[[str, str], Awaitable[None]] | None = None,
+        *,
+        source_line_has_content: bool = False,
     ) -> _RenderWork[Awaitable[None]]:
         if isinstance(template, (bytes, bytearray)):
             raise TypeError("templates must be text")
@@ -152,7 +165,11 @@ class AsyncChevronRender:
                 template = ""
             tokens = _tokenize(template, *frame.delimiters, include_raw=True)
         return _RenderWork[Awaitable[None]](
-            tokens, frame, frame.delimiters, continuation
+            tokens,
+            frame,
+            frame.delimiters,
+            continuation,
+            source_line_has_content=source_line_has_content,
         )
 
     async def _drive(self, root: _RenderWork[Awaitable[None]]) -> str:
@@ -174,9 +191,13 @@ class AsyncChevronRender:
                     work.close_tokens()
                     result = "".join(work.output)
                     if not active:
-                        return result
+                        return (
+                            result[: -len(work.terminal_padding)]
+                            if work.terminal_padding
+                            else result
+                        )
                     assert work.continuation is not None
-                    await work.continuation(result)
+                    await work.continuation(result, work.terminal_padding)
                     continue
                 await self._render_token(work, cast(Token, token), active)
         finally:
@@ -205,11 +226,11 @@ class AsyncChevronRender:
         key: str,
         frame: _RenderFrame,
         active: list[_RenderWork[Awaitable[None]]],
-        continuation: Callable[[str], Awaitable[None]],
+        continuation: Callable[[str, str], Awaitable[None]],
     ) -> None:
         result = await self._await_result(result)
         if result is None:
-            await continuation(self.empty_result(key))
+            await continuation(self.empty_result(key), "")
             return
         _push_work(
             active,
@@ -263,12 +284,13 @@ class AsyncChevronRender:
             if index and index % 64 == 0:
                 await anyio.lowlevel.checkpoint()
             tag, name = token[:2]
-            if tag in ("section", "inverted section") and name == key:
-                depth += 1
-            elif tag == "end" and name == key:
-                if depth == 0:
+            if tag == "end":
+                if depth == 0 and name == key:
                     break
-                depth -= 1
+                if depth:
+                    depth -= 1
+            elif tag in _BODY_OPENERS:
+                depth += 1
             body.append(token)
             if tag == "set delimiter":
                 ending = _changed_delimiters(name)
@@ -291,8 +313,8 @@ class AsyncChevronRender:
             if protocol == _SECTION_PROTOCOL:
                 result_frame = work.frame.with_context(body.opening, work.frame.padding)
 
-                async def append_result(result: str) -> None:
-                    work.append(result)
+                async def append_result(result: str, _terminal_padding: str) -> None:
+                    work.append(result, _terminal_padding)
 
                 await self._schedule_result(
                     value(body.source()),
@@ -311,9 +333,11 @@ class AsyncChevronRender:
             work.delimiters = body.ending
             values = aiter(value)
 
-            async def render_next(result: str | None = None) -> None:
+            async def render_next(
+                result: str | None = None, terminal_padding: str = ""
+            ) -> None:
                 if result is not None:
-                    work.append(result)
+                    work.append(result, terminal_padding=terminal_padding)
                 try:
                     item = await anext(values)
                 except StopAsyncIteration:
@@ -321,7 +345,12 @@ class AsyncChevronRender:
                 child = work.frame.child(item, body.opening, work.frame.padding)
                 _push_work(
                     active,
-                    _RenderWork.from_tokens(iter(body.tokens), child, render_next),
+                    _RenderWork.from_tokens(
+                        iter(body.tokens),
+                        child,
+                        render_next,
+                        source_line_has_content=work.source_line_has_content,
+                    ),
                 )
 
             await render_next()
@@ -331,9 +360,11 @@ class AsyncChevronRender:
             work.delimiters = body.ending
             values = iter(value)
 
-            async def render_next(result: str | None = None) -> None:
+            async def render_next(
+                result: str | None = None, terminal_padding: str = ""
+            ) -> None:
                 if result is not None:
-                    work.append(result)
+                    work.append(result, terminal_padding=terminal_padding)
                 try:
                     item = next(values)
                 except StopIteration:
@@ -341,7 +372,12 @@ class AsyncChevronRender:
                 child = work.frame.child(item, body.opening, work.frame.padding)
                 _push_work(
                     active,
-                    _RenderWork.from_tokens(iter(body.tokens), child, render_next),
+                    _RenderWork.from_tokens(
+                        iter(body.tokens),
+                        child,
+                        render_next,
+                        source_line_has_content=work.source_line_has_content,
+                    ),
                 )
 
             await render_next()
@@ -359,15 +395,10 @@ class AsyncChevronRender:
         name = _partial_name(key, work.frame, self.policy, config.logger)
         if name is None:
             return
-        try:
-            partial = config.partials_dict[name]
-            if dynamic:
-                config.logger.debug("Resolved dynamic partial from configured partials")
-            else:
-                config.logger.debug(
-                    "Resolved partial '%s' from configured partials", name
-                )
-        except KeyError:
+        partial = _configured_partial(
+            name, config.partials_dict, config.logger, dynamic=dynamic
+        )
+        if partial is _MISSING:
             partial = await _aget_filesystem_partial(
                 name,
                 config.partials_path,
@@ -375,19 +406,111 @@ class AsyncChevronRender:
                 config.logger,
                 dynamic=dynamic,
             )
-        left = work.partial_padding()
+        site_padding = work.partial_padding()
+        left = (
+            site_padding.removeprefix(work.frame.padding)
+            if site_padding.startswith(work.frame.padding)
+            else site_padding
+        )
         padding = work.frame.padding + left if left.isspace() else work.frame.padding
         child = work.frame.with_context(config.default_delimiters, padding)
 
-        def append_partial(result: str) -> None:
-            work.append(result.rstrip(" \t") if left.isspace() else result)
+        def append_partial(result: str, terminal_padding: str) -> None:
+            result, terminal_padding = _restore_enclosing_padding(
+                result, terminal_padding, work.frame.padding
+            )
+            work.append(result, terminal_padding=terminal_padding)
 
-        async def append_partial_result(result: str) -> None:
-            append_partial(result)
+        async def append_partial_result(result: str, terminal_padding: str) -> None:
+            append_partial(result, terminal_padding)
 
         _push_work(
             active,
             await self._template_work(partial, child, append_partial_result),
+        )
+
+    async def _render_block(
+        self,
+        key: str,
+        work: _RenderWork[Awaitable[None]],
+        active: list[_RenderWork[Awaitable[None]]],
+        opening_is_standalone: bool,
+        source_line_has_content: bool,
+    ) -> None:
+        body = await self.collect_section(work.tokens, key, work.delimiters)
+        work.delimiters = body.ending
+        is_override = key in work.frame.overrides
+        template, frame, prefix = _prepare_block(
+            key, body, work.frame, work.partial_padding(), opening_is_standalone
+        )
+
+        async def append_block(result: str, terminal_padding: str) -> None:
+            if prefix and result.strip():
+                result = prefix + result
+            result, terminal_padding = _restore_enclosing_padding(
+                result, terminal_padding, work.frame.padding
+            )
+            work.append(result, terminal_padding=terminal_padding)
+
+        _push_work(
+            active,
+            await self._template_work(
+                template,
+                frame,
+                append_block,
+                source_line_has_content=(
+                    source_line_has_content if not is_override else False
+                ),
+            ),
+        )
+
+    async def _render_parent(
+        self,
+        key: str,
+        work: _RenderWork[Awaitable[None]],
+        active: list[_RenderWork[Awaitable[None]]],
+    ) -> None:
+        body = await self.collect_section(work.tokens, key, work.delimiters)
+        work.delimiters = body.ending
+        is_standalone = _parent_is_standalone(work, body)
+        work.strip_parent_suffix = is_standalone
+        work.restore_parent_suffix = not is_standalone
+        config = self.config
+        dynamic = key.startswith("*")
+        name = _partial_name(key, work.frame, self.policy, config.logger, kind="parent")
+        if name is None:
+            return
+        parent = _configured_partial(
+            name, config.partials_dict, config.logger, dynamic=dynamic, kind="parent"
+        )
+        if parent is _MISSING:
+            parent = await _aget_filesystem_partial(
+                name,
+                config.partials_path,
+                config.partials_ext,
+                config.logger,
+                dynamic=dynamic,
+                kind="parent",
+            )
+        site_padding = work.partial_padding() if is_standalone else ""
+        left = (
+            site_padding.removeprefix(work.frame.padding)
+            if site_padding.startswith(work.frame.padding)
+            else site_padding
+        )
+        padding = work.frame.padding + left if left.isspace() else work.frame.padding
+        frame = work.frame.with_context(config.default_delimiters, padding)
+        frame = frame.with_overrides(_parent_overrides(body))
+
+        async def append_parent(result: str, terminal_padding: str) -> None:
+            result, terminal_padding = _restore_enclosing_padding(
+                result, terminal_padding, work.frame.padding
+            )
+            work.append(result, terminal_padding=terminal_padding)
+
+        _push_work(
+            active,
+            await self._template_work(parent, frame, append_parent),
         )
 
     async def _render_token(
@@ -397,12 +520,36 @@ class AsyncChevronRender:
         active: list[_RenderWork[Awaitable[None]]],
     ) -> None:
         tag, key = token[:2]
+        source_line_has_content = work.source_line_has_content
+        if tag == "literal":
+            work.observe_source_literal(token)
+        elif tag != "parent":
+            work.source_line_has_content = True
+        if work.strip_parent_suffix and tag != "literal":
+            work.strip_parent_suffix = False
+        if work.restore_parent_suffix and tag != "literal":
+            work.restore_parent_suffix = False
         if _apply_control_token(work, tag, key):
+            if tag == "parent":
+                work.source_line_has_content = True
             return
 
         match tag:
             case "literal":
-                work.append(key.replace("\n", "\n" + work.frame.padding))
+                raw = token[2] if len(token) == 3 else key
+                key, work.restore_parent_suffix = _restore_parent_suffix(
+                    key, raw, work.restore_parent_suffix
+                )
+                key, work.strip_parent_suffix = _consume_parent_suffix(
+                    key, work.strip_parent_suffix
+                )
+                rendered = _apply_line_padding(key, work.frame.padding)
+                terminal_padding = (
+                    work.frame.padding
+                    if key.endswith(("\n", "\r")) and work.frame.padding
+                    else ""
+                )
+                work.append(rendered, terminal_padding=terminal_padding)
             case "variable" | "no escape":
                 await self._render_interpolation(key, tag, work, active)
             case "section":
@@ -416,6 +563,17 @@ class AsyncChevronRender:
                 )
             case "partial":
                 await self._render_partial(key, work, active)
+            case "parent":
+                await self._render_parent(key, work, active)
+                work.source_line_has_content = True
+            case "block":
+                await self._render_block(
+                    key,
+                    work,
+                    active,
+                    opening_is_standalone=not source_line_has_content,
+                    source_line_has_content=source_line_has_content,
+                )
 
     async def _render_interpolation(
         self,
@@ -439,7 +597,7 @@ class AsyncChevronRender:
         if protocol == _FUNCTION_PROTOCOL:
             result_frame = work.frame.with_context(self.config.default_delimiters, "")
 
-            async def append_result(result: str) -> None:
+            async def append_result(result: str, _terminal_padding: str) -> None:
                 append_value(result)
 
             await self._schedule_result(

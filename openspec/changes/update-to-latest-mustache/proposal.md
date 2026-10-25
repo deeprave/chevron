@@ -14,7 +14,7 @@ Updating the vendor set makes the current standard's expectations visible and pr
 - Use the compatibility map to distinguish isolated conformance corrections from requirements that need the iterative-renderer state model.
 - Implement isolated shared semantic corrections while retaining the iterative refactor as the prerequisite for state-machine-dependent extensions.
 - Correct dotted-name resolution so that, after the initial name resolves in a scope, later dotted segments resolve only from that value rather than falling back to an outer scope.
-- Implement the upstream dynamic-name and inheritance modules, including their partial lookup, block override, scope, recursion, standalone whitespace, and indentation behaviours.
+- Implement the upstream dynamic-name and inheritance modules, including dynamic partial and parent lookup, block override, scope, recursion, standalone whitespace, and indentation behaviours.
 - Document the pinned upstream revision and implemented Mustache module support.
 
 ## Capabilities

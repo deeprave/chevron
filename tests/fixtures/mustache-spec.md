@@ -10,9 +10,8 @@ conformance corrections land against the same upstream snapshot.
 - Command: `uv run pytest -m conformance -q --tb=no`
 - Fixture examples: 194 across nine modules
 
-The inheritance module remains intentionally included while its unsupported
-cases fail. Future conformance work should compare against this snapshot rather
-than a moving upstream `HEAD`.
+All vendored modules currently pass. Future conformance work should compare
+against this snapshot rather than a moving upstream `HEAD`.
 
 ## Synchronous renderer
 
@@ -26,10 +25,10 @@ than a moving upstream `HEAD`.
 | sections | 34 | 34 | 0 |
 | lambdas | 10 | 10 | 0 |
 | dynamic names | 21 | 21 | 0 |
-| inheritance | 27 | 0 | 27 |
-| **Total** | **194** | **167** | **27** |
+| inheritance | 27 | 27 | 0 |
+| **Total** | **194** | **194** | **0** |
 
-The remaining failures are the inheritance extension cases shown above.
+The synchronous renderer passes every fixture in the pinned suite.
 
 ## Asynchronous renderer
 
@@ -46,8 +45,8 @@ backends. Each backend has the same result profile as the synchronous renderer.
 | sections | 34 | 34 | 0 | 34 | 0 |
 | lambdas | 10 | 10 | 0 | 10 | 0 |
 | dynamic names | 21 | 21 | 0 | 21 | 0 |
-| inheritance | 27 | 0 | 27 | 0 | 27 |
-| **Total per backend** | **194** | **167** | **27** | **167** | **27** |
+| inheritance | 27 | 27 | 0 | 27 | 0 |
+| **Total per backend** | **194** | **194** | **0** | **194** | **0** |
 
-Across the synchronous, asyncio, and Trio executions, the baseline comprises
-582 test executions: 501 pass and 81 fail.
+Across the synchronous, asyncio, and Trio executions, the suite comprises 582
+test executions, all passing.

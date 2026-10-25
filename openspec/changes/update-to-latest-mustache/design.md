@@ -33,15 +33,6 @@ The interpolation failure is `Dotted Names - Context Precedence`. The dynamic
 and inheritance failures cover their current upstream extension requirements;
 this map is input to, not an exception from, the eventual all-passing gate.
 
-## Current implementation status
-
-After the isolated dotted-name and dynamic-partial corrections, every dynamic
-name case passes in the synchronous, asyncio, and Trio renderers. Each mode
-now has 167 passing and 27 failing cases; the remaining failures are all from
-the inheritance module. Dynamic partial names resolve exactly one leading
-asterisk name through the active frame, then reuse the established partial
-lookup and rendering path without adding a scope frame.
-
 ## Goals / Non-Goals
 
 **Goals:**
@@ -88,12 +79,12 @@ Resume this change only after the refactor is ready for the implementation work.
 
 ### Defer public API shape until implementation is understood
 
-Dynamic partial names and inheritance should initially reuse the established
-rendering and partial-lookup contracts. Do not decide that this is a permanent
-public-API constraint before the implementation shape is known. If a new
-argument becomes necessary, make it keyword-only, preserve existing callers
-where possible, and retain compatibility mode when direct preservation is not
-possible.
+Dynamic partial and parent names, and inheritance, should initially reuse the
+established rendering and partial-lookup contracts. Do not decide that this is
+a permanent public-API constraint before the implementation shape is known. If
+a new argument becomes necessary, make it keyword-only, preserve existing
+callers where possible, and retain compatibility mode when direct preservation
+is not possible.
 
 ### Preserve dotted-name scope after the first component resolves
 
@@ -103,9 +94,15 @@ This matches the new upstream context-precedence fixture and keeps ordinary top-
 
 ### Extend partial rendering rather than bypassing partial policy
 
-Dynamic partial names resolve a context value first and then pass the resolved name through the established partial lookup path. Parent partials reuse ordinary partial lookup for their parent name, but carry a render-local block-override mapping through that parent render. This preserves `partials_dict` precedence, opt-in filesystem partial lookup, containment protections, and render re-entrancy.
+Dynamic partial and parent names resolve a context value first and then pass the
+resolved name through the established partial lookup path. Parent partials
+carry a render-local block-override mapping through that parent render. This
+preserves `partials_dict` precedence, opt-in filesystem partial lookup,
+containment protections, and render re-entrancy. Dynamic parent names use the
+same one-step dereference rule as dynamic partial names; their resolved value
+selects the parent before block overrides are collected and applied.
 
-The tokenizer must represent parent and block constructs distinctly from ordinary sections so it can pair and collect overrides without treating their closing tags as unmatched sections. The renderer then applies the nearest override while retaining the existing context stack and ordinary partial indentation path.
+The tokenizer must represent parent and block constructs distinctly from ordinary sections so it can pair and collect overrides without treating their closing tags as unmatched sections. The renderer preserves the outermost supplied override across nested parent expansion, while retaining the existing context stack and ordinary partial indentation path. Within one parent invocation, the first direct block argument for a name is selected deterministically.
 
 ### Keep upstream fixtures independent from Chevron behavioural tests
 

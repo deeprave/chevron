@@ -41,7 +41,7 @@ chevron.render("{{> greeting}}", {"name": "Ada"}, partials_path="partials")
 
 Chevron rejects absolute names, parent traversal, and resolved paths outside that directory. Use `partials_path='.'` only when intentionally restoring the historical current-directory lookup.
 
-### Dynamic partial names
+### Dynamic partial and parent names
 
 Prefix a partial name with `*` to choose the partial from the active template
 context. The remainder is a normal dotted name; its resolved text is used once
@@ -72,6 +72,29 @@ Dynamic names use the same mapped-partial precedence and opt-in filesystem
 containment rules as ordinary partials. With `partials_path`, selector data can
 choose any contained partial file. Treat that data as trusted; to restrict
 selection to an allow-list, omit `partials_path` and use `partials_dict` only.
+
+The same single-dereference form is available for parent templates. A parent
+can expose named blocks, and the invoking template can supply replacements:
+
+```python
+chevron.render(
+    "{{<*layout}}{{$body}}Hello, {{name}}.{{/body}}{{/*layout}}",
+    {"layout": "page", "name": "Ada"},
+    partials_dict={"page": "<main>{{$body}}Default{{/body}}</main>"},
+)
+# "<main>Hello, Ada.</main>"
+```
+
+Parent and block tags preserve ordinary partial lookup, active scope,
+standalone-line, and indentation behaviour. A missing dynamic parent renders
+the entire parent invocation as empty.
+
+### Compatibility
+
+Chevron 0.16.0 reserves `$` and `<` as named-block and parent prefixes. As a
+result, `{{$name}}` and `{{<name}}` are no longer interpolations of variables
+whose names begin with those characters; they are opening tags and must have
+matching closing tags.
 
 ## Lambdas
 
