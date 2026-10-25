@@ -18,6 +18,24 @@ class _TokenizationState:
     last_tag_line: int | None = None
 
 
+def _line_break_count(text: str) -> int:
+    """Count CRLF, LF, and CR line endings as one line each."""
+    return text.count("\r") + text.count("\n") - text.count("\r\n")
+
+
+def _split_first_line(text: str) -> tuple[str, str]:
+    """Return text before its first line ending and the remaining suffix."""
+    carriage_return = text.find("\r")
+    line_feed = text.find("\n")
+    if carriage_return < 0:
+        line_break = line_feed
+    elif line_feed < 0:
+        line_break = carriage_return
+    else:
+        line_break = min(carriage_return, line_feed)
+    return (text, "") if line_break < 0 else (text[:line_break], text[line_break:])
+
+
 #
 # Helper functions
 #
@@ -31,7 +49,7 @@ def grab_literal(
     try:
         # Look for the next tag and move the template to it
         literal, template = template.split(l_del, 1)
-        state.current_line += literal.count("\n")
+        state.current_line += _line_break_count(literal)
         return (literal, template)
 
     # There are no more tags in the template?
@@ -44,8 +62,9 @@ def l_sa_check(template: str, literal: str, is_standalone: bool | None) -> bool 
     """Do a preliminary check to see if a tag could be a standalone"""
 
     # If there is a newline, or the previous tag was a standalone
-    if literal.find("\n") != -1 or is_standalone:
-        padding = literal.split("\n")[-1]
+    line_break = max(literal.rfind("\n"), literal.rfind("\r"))
+    if line_break >= 0 or is_standalone:
+        padding = literal[line_break + 1 :]
 
         # If all the characters since the last newline are spaces
         if padding.isspace() or padding == "":
@@ -61,10 +80,10 @@ def r_sa_check(template: str, tag_type: str, is_standalone: bool | None) -> bool
 
     # Check right side if we might be a standalone
     if is_standalone and tag_type not in ["variable", "no escape"]:
-        on_newline = template.split("\n", 1)
+        on_newline, _ = _split_first_line(template)
 
         # If the stuff to the right of us are spaces we're a standalone
-        if on_newline[0].isspace() or not on_newline[0]:
+        if on_newline.isspace() or not on_newline:
             return True
         else:
             return False
@@ -84,6 +103,8 @@ def parse_tag(
         "^": "inverted section",
         "/": "end",
         ">": "partial",
+        "<": "parent",
+        "$": "block",
         "=": "set delimiter?",
         "{": "no escape?",
         "&": "no escape",
@@ -178,7 +199,11 @@ def tokenize(
      * inverted section
      * end
      * partial
+     * parent
+     * block
      * no escape
+     * comment
+     * set delimiter
 
     And tag_key is either the key or in the case of a literal tag,
     the literal itself.
@@ -234,7 +259,7 @@ def tokenize(
             l_del, r_del = dels[0], dels[-1]
 
         # If we are a section tag
-        elif tag_type in ["section", "inverted section"]:
+        elif tag_type in ["section", "inverted section", "parent", "block"]:
             # Then open a new section
             open_sections.append(tag_key)
             state.last_tag_line = state.current_line
@@ -267,14 +292,18 @@ def tokenize(
         if is_standalone:
             # Remove the stuff before the newline
             remaining_template = template
-            template = template.split("\n", 1)[-1]
+            _, line_suffix = _split_first_line(template)
+            if line_suffix.startswith("\r\n"):
+                template = line_suffix[2:]
+            elif line_suffix:
+                template = line_suffix[1:]
             raw_standalone_suffix = (
                 remaining_template[: -len(template)] if template else remaining_template
             )
-            state.current_line += raw_standalone_suffix.count("\n")
+            state.current_line += _line_break_count(raw_standalone_suffix)
 
             # Partials need to keep the spaces on their left
-            if tag_type != "partial":
+            if tag_type not in ("partial", "parent"):
                 # But other tags don't
                 literal = literal.rstrip(" ")
 

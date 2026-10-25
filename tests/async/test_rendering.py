@@ -11,6 +11,12 @@ import pytest
 import chevron
 from async_support import ANYIO_BACKENDS
 from chevron import ChevronError
+from inheritance_cases import (
+    ASYNC_INHERITANCE_CASES,
+    INHERITANCE_CASES,
+    InheritanceCase,
+)
+from token_cases import MALFORMED_RESERVED_TAG_TEMPLATES, TOKEN_VALIDATION_CASES
 
 
 class TruthinessError:
@@ -29,6 +35,33 @@ async def test_async_render_renders_text_on_supported_backends(
     assert await chevron.async_render("Hello, {{name}}!", {"name": "World"}) == (
         "Hello, World!"
     )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+@pytest.mark.parametrize(
+    ("_name", "tokens", "message"),
+    TOKEN_VALIDATION_CASES,
+    ids=[case[0] for case in TOKEN_VALIDATION_CASES],
+)
+async def test_async_direct_token_sequences_validate_structure(
+    anyio_backend: str,
+    _name: str,
+    tokens: tuple[tuple[str, str], ...],
+    message: str,
+) -> None:
+    with pytest.raises(ChevronError, match=message):
+        await chevron.async_render(tokens)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+@pytest.mark.parametrize("template", MALFORMED_RESERVED_TAG_TEMPLATES)
+async def test_async_unclosed_reserved_inheritance_tags_raise_chevron_syntax_errors(
+    anyio_backend: str, template: str
+) -> None:
+    with pytest.raises(ChevronError):
+        await chevron.async_render(template)
 
 
 @pytest.mark.anyio
@@ -190,6 +223,70 @@ async def test_async_dynamic_partial_cycle_fails_with_a_bounded_error(
             {"name": "self"},
             partials_dict={"self": "{{>*name}}"},
         )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_missing_dynamic_parent_renders_empty(
+    anyio_backend: str,
+) -> None:
+    assert (
+        await chevron.async_render("before {{<*layout}}{{/*layout}} after")
+        == "before  after"
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_parent_override_preserves_literal_tokens(
+    anyio_backend: str,
+) -> None:
+    tokens = [
+        ("parent", "layout"),
+        ("block", "body"),
+        ("literal", "{{name}}"),
+        ("end", "body"),
+        ("end", "layout"),
+    ]
+
+    assert (
+        await chevron.async_render(
+            tokens,
+            {"name": "Ada"},
+            partials_dict={"layout": "{{$body}}default{{/body}}"},
+        )
+        == "{{name}}"
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_intrinsic_block_reindentation_preserves_trailing_spaces(
+    anyio_backend: str,
+) -> None:
+    assert (
+        await chevron.async_render(
+            "{{<parent}}{{$block}}hello  {{/block}}{{/parent}}",
+            partials_dict={"parent": "Hi,\n{{$block}}\n  default\n{{/block}}\n"},
+        )
+        == "Hi,\n  hello  "
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+@pytest.mark.parametrize(
+    "case", INHERITANCE_CASES + ASYNC_INHERITANCE_CASES, ids=lambda case: case.name
+)
+async def test_async_inheritance_case(
+    anyio_backend: str, case: InheritanceCase
+) -> None:
+    assert (
+        await chevron.async_render(
+            case.template, case.render_data(), partials_dict=case.partials
+        )
+        == case.expected
+    )
 
 
 @pytest.mark.anyio

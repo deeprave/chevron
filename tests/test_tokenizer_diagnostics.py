@@ -1,6 +1,7 @@
 import pytest
 
 import chevron
+from token_cases import MALFORMED_RESERVED_TAG_TEMPLATES, TOKEN_VALIDATION_CASES
 
 
 @pytest.mark.parametrize(
@@ -23,6 +24,14 @@ def test_malformed_templates_raise_chevron_syntax_errors(template: str) -> None:
         chevron.render(template)
 
     assert isinstance(error.value, SyntaxError)
+
+
+@pytest.mark.parametrize("template", MALFORMED_RESERVED_TAG_TEMPLATES)
+def test_unclosed_reserved_inheritance_tags_raise_chevron_syntax_errors(
+    template: str,
+) -> None:
+    with pytest.raises(chevron.ChevronError):
+        chevron.render(template)
 
 
 def test_unclosed_tag_reports_its_line() -> None:
@@ -59,3 +68,15 @@ def test_mismatched_closing_tag_reports_its_actual_line() -> None:
         ),
     ):
         chevron.render("first line\n{{#section}}\n{{/wrong_section}}")
+
+
+@pytest.mark.parametrize(
+    ("_name", "tokens", "message"),
+    TOKEN_VALIDATION_CASES,
+    ids=[case[0] for case in TOKEN_VALIDATION_CASES],
+)
+def test_direct_token_sequences_validate_structure(
+    _name: str, tokens: tuple[tuple[str, str], ...], message: str
+) -> None:
+    with pytest.raises(chevron.ChevronError, match=message):
+        chevron.render(tokens)

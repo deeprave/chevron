@@ -26,5 +26,6 @@
 
 ## 5. Implement template inheritance
 
-- [ ] 5.1 Extend tokenisation to represent parent and named-block tags without interpreting their closing tags as ordinary unmatched sections; verify the inheritance fixture parser cases execute without tokenisation errors.
-- [ ] 5.2 Implement render-local parent/block override handling using ordinary partial lookup and active scopes; verify every inheritance fixture passes, including defaults, nested inheritance, recursion, and scope cases.
+- [x] 5.1 Extend tokenisation to represent parent and named-block tags without interpreting their closing tags as ordinary unmatched sections; verify the inheritance fixture parser cases execute without tokenisation errors.
+- [x] 5.2 Implement render-local parent/block override handling using ordinary partial lookup and active scopes; verify every inheritance fixture passes, including defaults, nested inheritance, recursion, and scope cases.
+- [x] 5.3 Extend parent lookup to resolve one leading-asterisk dynamic name through the active context before applying ordinary lookup and block overrides; verify configured and missing dynamic parents in synchronous and asynchronous rendering.

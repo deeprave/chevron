@@ -8,9 +8,12 @@ All notable changes to Chevron are documented in this file.
 
 - `async_render()` provides runtime-neutral async rendering for applications using asyncio or Trio. The optional `anyio` or `trio` extra enables it; async lambdas, readers, iterables, and filesystem partials are supported without a library-owned event loop.
 - Added `API.md` with complete synchronous and asynchronous API, lambda, partial, and logging guidance.
-- Mustache dynamic partial names allow `{{>*name}}` to select one partial from
-  the active context while retaining the caller's scope, partial indentation,
-  and partial lookup policy.
+- Mustache inheritance supports parent templates and named-block overrides,
+  including nested inheritance, scope preservation, recursion, standalone
+  whitespace, and indentation.
+- Mustache dynamic names allow `{{>*name}}` to select one partial and
+  `{{<*name}}...{{/*name}}` to select a parent from the active context while
+  retaining the caller's scope, partial indentation, and partial lookup policy.
 
 ### Changed
 
@@ -19,10 +22,13 @@ All notable changes to Chevron are documented in this file.
   safely supporting finite nesting beyond Python's call-stack depth; cyclic
   engine-owned expansion raises a bounded `RecursionError`. Recursion initiated
   by application compatibility callbacks remains caller-controlled.
-- To support Mustache dynamic partial names, a partial name beginning with `*`
-  is now a deferred selector; Chevron no longer treats `{{>*name}}` as a
+- To support Mustache dynamic names, a partial or parent name beginning with
+  `*` is now a deferred selector; Chevron no longer treats `{{>*name}}` as a
   literal partial named `*name`. This small compatibility break is required by
   the current Mustache syntax and is expected to affect few templates.
+- `$` and `<` now begin Mustache named-block and parent tags. Consequently,
+  `{{$name}}` and `{{<name}}` are no longer interpolations of variable names
+  beginning with those characters; each must have a matching closing tag.
 - Renderer scope traversal now uses private immutable frames, so sections and
   nested renders never structurally mutate a caller-provided `scopes` sequence.
 - The internal tokenizer now accepts source text only. Direct callers that supply file-like objects receive a `TypeError`; `chevron.render()` continues to accept file-like templates. Moving input I/O to the renderer boundary prepares the package for async rendering.

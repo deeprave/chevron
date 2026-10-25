@@ -21,6 +21,17 @@ Chevron SHALL support a partial name prefixed with `*` by resolving the remainin
 - **WHEN** a dynamic partial name cannot be resolved or selects no available partial
 - **THEN** Chevron renders the tag as an empty value without loading an unintended partial
 
+### Requirement: Dynamic parent names resolve through the active context
+Chevron SHALL support a parent name prefixed with `*` by resolving the remaining name through the active template context, then loading the resulting parent using ordinary partial lookup rules. Dynamic parent lookup SHALL use one dereference and retain the parent invocation's block overrides and rendering context.
+
+#### Scenario: Dynamic parent name selects a configured parent
+- **WHEN** a template invokes a dynamic parent tag whose resolved name exists in the configured partial mapping
+- **THEN** Chevron renders that parent with the invocation's named-block overrides
+
+#### Scenario: Missing dynamic parent name is empty
+- **WHEN** a dynamic parent name cannot be resolved or selects no available parent
+- **THEN** Chevron renders the parent invocation as an empty value without loading an unintended partial
+
 ### Requirement: Parent partials support named block overrides
 Chevron SHALL support parent partials and named blocks so a child template can render a parent while overriding the parent's declared blocks. The parent SHALL use its default block content when the child supplies no override.
 
@@ -34,7 +45,11 @@ Chevron SHALL support parent partials and named blocks so a child template can r
 
 #### Scenario: Nested inheritance preserves block scope
 - **WHEN** parent templates inherit through multiple levels with nested block overrides
-- **THEN** each block resolves according to the nearest applicable override without changing ordinary template-data scope
+- **THEN** the outermost supplied override takes precedence across nested parent expansion without changing ordinary template-data scope
+
+#### Scenario: Duplicate direct block arguments are deterministic
+- **WHEN** one parent invocation supplies more than one direct block argument with the same name
+- **THEN** Chevron uses the first supplied block argument for that name
 
 ### Requirement: Inherited partial output preserves standalone and indentation rules
 Chevron SHALL apply ordinary Mustache standalone-line and partial-indentation behaviour while rendering dynamic partials, parent partials, and block overrides.

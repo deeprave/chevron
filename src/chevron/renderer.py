@@ -10,7 +10,7 @@ from functools import update_wrapper
 import inspect
 import logging
 from pathlib import Path
-from types import TracebackType
+from types import MappingProxyType, TracebackType
 from typing import Any, Generic, Protocol, TypeAlias, TypeVar, cast
 
 from .tokenizer import ChevronError, tokenize as _tokenize
@@ -25,6 +25,7 @@ _LOGGER_NAME = "chevron"
 _DEFAULT_LOGGER = logging.getLogger(_LOGGER_NAME)
 _MAX_ACTIVE_WORK = 10_000
 _END_OF_TOKENS = object()
+_BODY_OPENERS = frozenset(("section", "inverted section", "parent", "block"))
 
 TemplateData: TypeAlias = Any
 """A value exposed to Mustache lookup, intentionally dynamically typed."""
@@ -319,20 +320,41 @@ def _get_partial(
     logger: _RenderLogger,
     *,
     dynamic: bool = False,
+    kind: str = "partial",
 ) -> TemplateInput:
-    """Load a partial"""
-    try:
-        # Maybe the partial is in the dictionary
-        partial = partials_dict[name]
-        if dynamic:
-            logger.debug("Resolved dynamic partial from configured partials")
-        else:
-            logger.debug("Resolved partial '%s' from configured partials", name)
+    """Load a partial-like template."""
+    partial = _configured_partial(
+        name, partials_dict, logger, dynamic=dynamic, kind=kind
+    )
+    if partial is not _MISSING:
         return partial
+    return _get_filesystem_partial(
+        name, partials_path, partials_ext, logger, dynamic=dynamic, kind=kind
+    )
+
+
+def _configured_partial(
+    name: str,
+    partials_dict: PartialMapping,
+    logger: _RenderLogger,
+    *,
+    dynamic: bool = False,
+    kind: str = "partial",
+) -> TemplateInput | object:
+    """Return a configured partial, or the private missing sentinel.
+
+    This pure mapping lookup is shared by both renderers; their filesystem
+    fallback remains explicit because synchronous and AnyIO I/O differ.
+    """
+    try:
+        partial = partials_dict[name]
     except KeyError:
-        return _get_filesystem_partial(
-            name, partials_path, partials_ext, logger, dynamic=dynamic
-        )
+        return _MISSING
+    if dynamic:
+        logger.debug("Resolved dynamic %s from configured partials", kind)
+    else:
+        logger.debug("Resolved %s '%s' from configured partials", kind, name)
+    return partial
 
 
 def _filesystem_partial_name(name: str, partials_ext: str) -> Path | None:
@@ -362,14 +384,15 @@ def _get_filesystem_partial(
     logger: _RenderLogger,
     *,
     dynamic: bool = False,
+    kind: str = "partial",
 ) -> str:
     """Load a partial from the configured filesystem path."""
     # Don't try loading from the file system if the partials_path is None or empty
     if partials_path is None or partials_path == "":
         if dynamic:
-            logger.debug("Dynamic partial was not configured")
+            logger.debug("Dynamic %s was not configured", kind)
         else:
-            logger.debug("Partial '%s' was not configured", name)
+            logger.debug("%s '%s' was not configured", kind.capitalize(), name)
         return ""
 
     try:
@@ -378,9 +401,9 @@ def _get_filesystem_partial(
         if partial_name is None:
             reason = _filesystem_partial_rejection_reason(name, partials_ext)
             if dynamic:
-                logger.debug("Rejected dynamic partial reference: %s", reason)
+                logger.debug("Rejected dynamic %s reference: %s", kind, reason)
             else:
-                logger.debug("Rejected partial reference '%s': %s", name, reason)
+                logger.debug("Rejected %s reference '%s': %s", kind, name, reason)
             return ""
 
         partial_path = (base_path / partial_name).resolve(strict=True)
@@ -388,16 +411,16 @@ def _get_filesystem_partial(
         with partial_path.open("r", encoding="utf-8") as partial:
             content = partial.read()
         if dynamic:
-            logger.debug("Resolved dynamic partial from the configured path")
+            logger.debug("Resolved dynamic %s from the configured path", kind)
         else:
-            logger.debug("Resolved partial '%s' from the configured path", name)
+            logger.debug("Resolved %s '%s' from the configured path", kind, name)
         return content
 
     except (OSError, RuntimeError, ValueError):
         if dynamic:
-            logger.debug("Dynamic partial was unavailable")
+            logger.debug("Dynamic %s was unavailable", kind)
         else:
-            logger.debug("Partial '%s' was unavailable", name)
+            logger.debug("%s '%s' was unavailable", kind.capitalize(), name)
         return ""
 
 
@@ -420,6 +443,7 @@ class _RenderFrame:
     parent: "_RenderFrame | None"
     delimiters: tuple[str, str]
     padding: str = ""
+    overrides: Mapping[str, "_SectionBody"] = field(default_factory=dict)
 
     @classmethod
     def from_scopes(
@@ -453,6 +477,7 @@ class _RenderFrame:
             self,
             self.delimiters if delimiters is None else delimiters,
             self.padding if padding is None else padding,
+            self.overrides,
         )
 
     def with_context(
@@ -464,6 +489,33 @@ class _RenderFrame:
             self.parent,
             delimiters,
             self.padding if padding is None else padding,
+            self.overrides,
+        )
+
+    def with_overrides(self, overrides: Mapping[str, "_SectionBody"]) -> "_RenderFrame":
+        """Return this context with parent-local block overrides applied."""
+        combined = dict(overrides)
+        combined.update(self.overrides)
+        return _RenderFrame(
+            self.scope,
+            self.parent,
+            self.delimiters,
+            self.padding,
+            MappingProxyType(combined),
+        )
+
+    def without_override(self, key: str) -> "_RenderFrame":
+        """Return a frame where one active block override is masked."""
+        if key not in self.overrides:
+            return self
+        overrides = dict(self.overrides)
+        del overrides[key]
+        return _RenderFrame(
+            self.scope,
+            self.parent,
+            self.delimiters,
+            self.padding,
+            MappingProxyType(overrides),
         )
 
 
@@ -481,11 +533,15 @@ class _RenderWork(Generic[ContinuationResult]):
     tokens: TokenIterator
     frame: _RenderFrame
     delimiters: tuple[str, str]
-    continuation: Callable[[str], ContinuationResult] | None = None
+    continuation: Callable[[str, str], ContinuationResult] | None = None
     output: list[str] = field(default_factory=list)
     current_line_padding: list[str] = field(default_factory=list)
     current_line_has_content: bool = False
     current_line_is_whitespace: bool = False
+    source_line_has_content: bool = False
+    strip_parent_suffix: bool = False
+    restore_parent_suffix: bool = False
+    terminal_padding: str = ""
     token_close: Callable[[], object] | None = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -503,22 +559,41 @@ class _RenderWork(Generic[ContinuationResult]):
         cls,
         tokens: TokenIterator,
         frame: _RenderFrame,
-        continuation: Callable[[str], ContinuationResult] | None = None,
+        continuation: Callable[[str, str], ContinuationResult] | None = None,
+        *,
+        source_line_has_content: bool = False,
     ) -> "_RenderWork[ContinuationResult]":
         """Create work whose token context matches its frame."""
-        return cls(tokens, frame, frame.delimiters, continuation)
+        return cls(
+            tokens,
+            frame,
+            frame.delimiters,
+            continuation,
+            source_line_has_content=source_line_has_content,
+        )
 
-    def append(self, text: str) -> None:
+    def append(self, text: str, terminal_padding: str = "") -> None:
         """Append output and retain the suffix needed for partial padding."""
         self.output.append(text)
-        if "\n" in text:
-            self._set_current_line(text.rsplit("\n", 1)[1])
+        self.terminal_padding = terminal_padding if text else self.terminal_padding
+        line_break = max(text.rfind("\n"), text.rfind("\r"))
+        if line_break >= 0:
+            self._set_current_line(text[line_break + 1 :])
         elif text:
             self._append_current_line(text)
 
     def partial_padding(self) -> str:
         """Return current-line indentation when it is whitespace only."""
         return "".join(self.current_line_padding)
+
+    def observe_source_literal(self, token: Token) -> None:
+        """Track whether the current source line contains non-whitespace text."""
+        text = token[2] if len(token) == 3 else token[1]
+        line_break = max(text.rfind("\n"), text.rfind("\r"))
+        if line_break >= 0:
+            self.source_line_has_content = bool(text[line_break + 1 :].strip())
+        elif text.strip():
+            self.source_line_has_content = True
 
     def _set_current_line(self, text: str) -> None:
         self.current_line_has_content = bool(text)
@@ -557,7 +632,7 @@ def _apply_control_token(
         work.delimiters = _changed_delimiters(key)
         return True
     if work.frame.scope is _SKIPPED_SECTION_MARKER and work.frame.parent is not None:
-        if tag in ("section", "inverted section"):
+        if tag in _BODY_OPENERS:
             work.frame = work.frame.child(_SKIPPED_SECTION_MARKER)
         return True
     return False
@@ -570,16 +645,39 @@ def _interpolation_text(value: TemplateData, tag: str) -> str:
 
 
 def _validated_tokens(tokens: TokenSequence) -> TokenIterator:
-    """Yield direct token input after enforcing Chevron's public token shapes."""
+    """Yield direct tokens after validating their structural nesting."""
 
-    for token in tokens:
+    open_tags: list[tuple[str, int]] = []
+    for position, token in enumerate(tokens, start=1):
         if isinstance(token, str):
             raise TypeError("template tokens must be non-string sequences")
         match len(token):
             case 2 | 3:
+                tag, key = token[:2]
+                if tag in _BODY_OPENERS:
+                    open_tags.append((key, position))
+                elif tag == "end":
+                    if not open_tags:
+                        raise ChevronError(
+                            f'Token {position}: trying to close tag "{key}", '
+                            "but it was not opened"
+                        )
+                    open_tag, open_position = open_tags.pop()
+                    if key != open_tag:
+                        raise ChevronError(
+                            f'Token {position}: trying to close tag "{key}"; '
+                            f'last open tag is "{open_tag}" at token {open_position}'
+                        )
                 yield token
             case _:
                 raise TypeError("template tokens must contain two or three values")
+
+    if open_tags:
+        tag, position = open_tags[-1]
+        raise ChevronError(
+            "Unexpected EOF in template tokens: "
+            f'tag "{tag}" opened at token {position} was never closed'
+        )
 
 
 class _SourcePolicy(Protocol):
@@ -665,17 +763,19 @@ def _partial_name(
     frame: _RenderFrame,
     policy: _SourcePolicy,
     logger: _RenderLogger,
+    *,
+    kind: str = "partial",
 ) -> str | None:
-    """Resolve one dynamic partial name without changing the active frame."""
+    """Resolve one dynamic template name without changing the active frame."""
     if not key.startswith("*"):
         return key
     if key.startswith("**"):
-        logger.debug("Dynamic partial selector requested nested dereferencing")
+        logger.debug("Dynamic %s selector requested nested dereferencing", kind)
         return None
 
     dynamic_key = key[1:].strip()
     if not dynamic_key:
-        logger.debug("Dynamic partial selector was empty")
+        logger.debug("Dynamic %s selector was empty", kind)
         return None
     value, _ = policy.resolve(
         dynamic_key,
@@ -685,7 +785,7 @@ def _partial_name(
     )
     if isinstance(value, str) and value:
         return value
-    logger.debug("Dynamic partial selector did not resolve to a non-empty string")
+    logger.debug("Dynamic %s selector did not resolve to a non-empty string", kind)
     return None
 
 
@@ -744,6 +844,8 @@ _TAG_SYMBOLS = {
     "inverted section": "^",
     "end": "/",
     "partial": ">",
+    "parent": "<",
+    "block": "$",
     "set delimiter": "=",
     "variable": "",
 }
@@ -798,24 +900,231 @@ class _SectionBody:
         return "".join(parts), tokens
 
 
-def _collect_section(
+def _collect_body(
     tokens: TokenIterator, key: str, delimiters: tuple[str, str]
 ) -> _SectionBody:
     body: list[Token] = []
-    depth = 0
+    nested: list[str] = []
     ending = delimiters
     for token in tokens:
         tag, name = token[:2]
-        if tag in ("section", "inverted section") and name == key:
-            depth += 1
-        elif tag == "end" and name == key:
-            if depth == 0:
+        if tag == "end":
+            if not nested and name == key:
                 break
-            depth -= 1
+            if nested:
+                nested.pop()
+        elif tag in _BODY_OPENERS:
+            nested.append(name)
         body.append(token)
         if tag == "set delimiter":
             ending = _changed_delimiters(name)
     return _SectionBody(body, delimiters, ending)
+
+
+def _parent_overrides(body: _SectionBody) -> Mapping[str, _SectionBody]:
+    """Collect first direct block arguments from one parent invocation."""
+    overrides: dict[str, _SectionBody] = {}
+    tokens = iter(body.tokens)
+    delimiters = body.opening
+    nested = 0
+    for token in tokens:
+        tag, key = token[:2]
+        if tag == "block" and nested == 0:
+            block = _collect_body(tokens, key, delimiters)
+            overrides.setdefault(key, block)
+            delimiters = block.ending
+            continue
+        if tag in _BODY_OPENERS:
+            nested += 1
+        elif tag == "end" and nested:
+            nested -= 1
+        if tag == "set delimiter":
+            delimiters = _changed_delimiters(key)
+    return MappingProxyType(overrides)
+
+
+def _parent_is_standalone(
+    work: _RenderWork[ContinuationResult], body: _SectionBody
+) -> bool:
+    """Return whether a parent invocation occupies its whole logical line."""
+    if work.source_line_has_content:
+        return False
+    source = body.source()
+    if source.lstrip(" \t").startswith(("\n", "\r")):
+        return True
+    nested = 0
+    for token in body.tokens:
+        tag, key = token[:2]
+        if nested == 0:
+            if tag == "literal" and key.strip():
+                return False
+            if tag not in ("literal", "block", "comment", "set delimiter", "end"):
+                return False
+        if tag in _BODY_OPENERS:
+            nested += 1
+        elif tag == "end" and nested:
+            nested -= 1
+    return True
+
+
+def _common_indentation(source: str) -> str:
+    """Return the leading whitespace shared by non-blank source lines."""
+    common: str | None = None
+    for line in source.splitlines():
+        content = line.lstrip(" \t")
+        if not content:
+            continue
+        indentation = line[: len(line) - len(content)]
+        if common is None:
+            common = indentation
+            continue
+        while common and not indentation.startswith(common):
+            common = common[:-1]
+    return common or ""
+
+
+def _dedent_literal(
+    text: str, indentation: str, at_line_start: bool
+) -> tuple[str, bool]:
+    """Remove shared definition indentation from one literal token."""
+    parts: list[str] = []
+    for line in text.splitlines(keepends=True):
+        if at_line_start and line.startswith(indentation):
+            line = line[len(indentation) :]
+        parts.append(line)
+        at_line_start = line.endswith(("\n", "\r"))
+    return "".join(parts), at_line_start
+
+
+def _standalone_opening_source(source: str) -> str:
+    """Remove horizontal whitespace preceding a standalone opening newline."""
+    suffix = source.lstrip(" \t")
+    return suffix if suffix.startswith(("\n", "\r")) else source
+
+
+def _block_tokens(body: _SectionBody) -> TokenSequence:
+    """Prepare override tokens without turning literal data back into syntax."""
+    source = _standalone_opening_source(body.source())
+    if not source.startswith(("\n", "\r")):
+        return body.tokens
+
+    indentation = _common_indentation(source)
+    drop_newline = True
+    at_line_start = True
+    raw_at_line_start = True
+    tokens: list[Token] = []
+    for token in body.tokens:
+        tag, text = token[:2]
+        if tag != "literal":
+            raw = token[2] if len(token) == 3 else text
+            _, at_line_start = _dedent_literal(raw, "", at_line_start)
+            _, raw_at_line_start = _dedent_literal(raw, "", raw_at_line_start)
+            tokens.append(token)
+            continue
+
+        raw = token[2] if len(token) == 3 else text
+        if drop_newline:
+            raw = _standalone_opening_source(raw)
+            if text.startswith("\r\n"):
+                text = text[2:]
+            elif text.startswith(("\n", "\r")):
+                text = text[1:]
+            elif not text and raw.startswith(("\r\n", "\n", "\r")):
+                pass
+            else:
+                tokens.append(token)
+                continue
+            if raw.startswith("\r\n"):
+                raw = raw[2:]
+            elif raw.startswith(("\n", "\r")):
+                raw = raw[1:]
+            drop_newline = False
+        text, at_line_start = _dedent_literal(text, indentation, at_line_start)
+        raw, raw_at_line_start = _dedent_literal(raw, indentation, raw_at_line_start)
+        tokens.append((tag, text, raw) if len(token) == 3 else (tag, text))
+    return tokens
+
+
+def _block_indentation(body: _SectionBody) -> str:
+    """Return the default block body's intrinsic indentation, if any."""
+    source = _standalone_opening_source(body.source())
+    if not source.startswith(("\n", "\r")):
+        return ""
+    lines = source.splitlines()
+    for line in lines:
+        if line.strip():
+            return line[: len(line) - len(line.lstrip(" \t"))]
+    return lines[-1] if lines else ""
+
+
+def _prepare_block(
+    key: str,
+    body: _SectionBody,
+    frame: _RenderFrame,
+    site_padding: str,
+    opening_is_standalone: bool,
+) -> tuple[TokenSequence, _RenderFrame, str]:
+    """Choose block content and its inherited render context."""
+    override = frame.overrides.get(key)
+    if override is None:
+        return body.tokens, frame.with_context(body.opening, frame.padding), ""
+
+    local_padding = (
+        site_padding.removeprefix(frame.padding)
+        if site_padding.startswith(frame.padding)
+        else site_padding
+    )
+    indentation = local_padding or (
+        _block_indentation(body) if opening_is_standalone else ""
+    )
+    prefix = indentation if not local_padding else ""
+    child = frame.without_override(key).with_context(
+        override.opening, frame.padding + indentation
+    )
+    return _block_tokens(override), child, prefix
+
+
+def _consume_parent_suffix(text: str, pending: bool) -> tuple[str, bool]:
+    """Remove exactly the standalone parent closing-line suffix."""
+    if not pending:
+        return text, False
+    suffix = text.lstrip(" \t")
+    if suffix.startswith("\r\n"):
+        return suffix[2:], False
+    if suffix.startswith(("\n", "\r")):
+        return suffix[1:], False
+    return text, False
+
+
+def _restore_parent_suffix(text: str, raw: str, pending: bool) -> tuple[str, bool]:
+    """Restore a tokenizer-removed suffix for a non-standalone parent."""
+    if not pending or text:
+        return text, False
+    suffix = raw.lstrip(" \t")
+    if suffix.startswith("\r\n"):
+        return "\r\n", False
+    if suffix.startswith(("\n", "\r")):
+        return suffix[0], False
+    return text, False
+
+
+def _restore_enclosing_padding(
+    result: str, terminal_padding: str, enclosing_padding: str
+) -> tuple[str, str]:
+    """Replace known engine-added terminal padding with enclosing padding."""
+    if not terminal_padding:
+        return result, ""
+    return result[: -len(terminal_padding)] + enclosing_padding, enclosing_padding
+
+
+def _apply_line_padding(text: str, padding: str) -> str:
+    """Prefix each line following a supported line ending with padding."""
+    if not padding:
+        return text
+    return "".join(
+        line + padding if line.endswith(("\n", "\r")) else line
+        for line in text.splitlines(keepends=True)
+    )
 
 
 class ChevronRender:
@@ -834,7 +1143,9 @@ class ChevronRender:
         self,
         template: TemplateInput,
         frame: _RenderFrame,
-        continuation: Callable[[str], None] | None = None,
+        continuation: Callable[[str, str], None] | None = None,
+        *,
+        source_line_has_content: bool = False,
     ) -> _RenderWork[None]:
         if isinstance(template, (bytes, bytearray)):
             raise TypeError("templates must be text")
@@ -847,7 +1158,13 @@ class ChevronRender:
             if not template and not isinstance(template, str):
                 template = ""
             tokens = _tokenize(template, *frame.delimiters, include_raw=True)
-        return _RenderWork[None](tokens, frame, frame.delimiters, continuation)
+        return _RenderWork[None](
+            tokens,
+            frame,
+            frame.delimiters,
+            continuation,
+            source_line_has_content=source_line_has_content,
+        )
 
     def _drive(self, root: _RenderWork[None]) -> str:
         """Run active work without placing nested template expansion on the stack."""
@@ -861,9 +1178,13 @@ class ChevronRender:
                     work.close_tokens()
                     result = "".join(work.output)
                     if not active:
-                        return result
+                        return (
+                            result[: -len(work.terminal_padding)]
+                            if work.terminal_padding
+                            else result
+                        )
                     assert work.continuation is not None
-                    work.continuation(result)
+                    work.continuation(result, work.terminal_padding)
                     continue
                 self._render_token(work, cast(Token, token), active)
         finally:
@@ -892,11 +1213,11 @@ class ChevronRender:
         key: str,
         frame: _RenderFrame,
         active: list[_RenderWork[None]],
-        continuation: Callable[[str], None],
+        continuation: Callable[[str, str], None],
     ) -> None:
         result = _reject_awaitable_lambda_result(result, key)
         if result is None:
-            continuation(self.empty_result(key))
+            continuation(self.empty_result(key), "")
             return
         _push_work(
             active,
@@ -946,7 +1267,7 @@ class ChevronRender:
     ) -> None:
         value, _ = self.resolve(key, work.frame)
         if isinstance(value, Callable):
-            body = _collect_section(work.tokens, key, work.delimiters)
+            body = _collect_body(work.tokens, key, work.delimiters)
             work.delimiters = body.ending
             protocol = _lambda_protocol(value, "section")
             self.config.logger.debug(
@@ -970,13 +1291,15 @@ class ChevronRender:
                 "use chevron.async_render instead"
             )
         if isinstance(value, (Sequence, Iterator)) and not isinstance(value, str):
-            body = _collect_section(work.tokens, key, work.delimiters)
+            body = _collect_body(work.tokens, key, work.delimiters)
             work.delimiters = body.ending
             values = iter(value)
 
-            def render_next(result: str | None = None) -> None:
+            def render_next(
+                result: str | None = None, terminal_padding: str = ""
+            ) -> None:
                 if result is not None:
-                    work.append(result)
+                    work.append(result, terminal_padding=terminal_padding)
                 try:
                     item = next(values)
                 except StopIteration:
@@ -984,7 +1307,12 @@ class ChevronRender:
                 child = work.frame.child(item, body.opening, work.frame.padding)
                 _push_work(
                     active,
-                    _RenderWork.from_tokens(iter(body.tokens), child, render_next),
+                    _RenderWork.from_tokens(
+                        iter(body.tokens),
+                        child,
+                        render_next,
+                        source_line_has_content=work.source_line_has_content,
+                    ),
                 )
 
             render_next()
@@ -1007,14 +1335,98 @@ class ChevronRender:
             config.logger,
             dynamic=dynamic,
         )
-        left = work.partial_padding()
+        site_padding = work.partial_padding()
+        left = (
+            site_padding.removeprefix(work.frame.padding)
+            if site_padding.startswith(work.frame.padding)
+            else site_padding
+        )
         padding = work.frame.padding + left if left.isspace() else work.frame.padding
         child = work.frame.with_context(config.default_delimiters, padding)
 
-        def append_partial(result: str) -> None:
-            work.append(result.rstrip(" \t") if left.isspace() else result)
+        def append_partial(result: str, terminal_padding: str) -> None:
+            result, terminal_padding = _restore_enclosing_padding(
+                result, terminal_padding, work.frame.padding
+            )
+            work.append(result, terminal_padding=terminal_padding)
 
         _push_work(active, self._template_work(partial, child, append_partial))
+
+    def _render_block(
+        self,
+        key: str,
+        work: _RenderWork[None],
+        active: list[_RenderWork[None]],
+        opening_is_standalone: bool,
+        source_line_has_content: bool,
+    ) -> None:
+        body = _collect_body(work.tokens, key, work.delimiters)
+        work.delimiters = body.ending
+        is_override = key in work.frame.overrides
+        template, frame, prefix = _prepare_block(
+            key, body, work.frame, work.partial_padding(), opening_is_standalone
+        )
+
+        def append_block(result: str, terminal_padding: str) -> None:
+            if prefix and result.strip():
+                result = prefix + result
+            result, terminal_padding = _restore_enclosing_padding(
+                result, terminal_padding, work.frame.padding
+            )
+            work.append(result, terminal_padding=terminal_padding)
+
+        _push_work(
+            active,
+            self._template_work(
+                template,
+                frame,
+                append_block,
+                source_line_has_content=(
+                    source_line_has_content if not is_override else False
+                ),
+            ),
+        )
+
+    def _render_parent(
+        self, key: str, work: _RenderWork[None], active: list[_RenderWork[None]]
+    ) -> None:
+        body = _collect_body(work.tokens, key, work.delimiters)
+        work.delimiters = body.ending
+        is_standalone = _parent_is_standalone(work, body)
+        work.strip_parent_suffix = is_standalone
+        work.restore_parent_suffix = not is_standalone
+        dynamic = key.startswith("*")
+        name = _partial_name(
+            key, work.frame, self.policy, self.config.logger, kind="parent"
+        )
+        if name is None:
+            return
+        parent = _get_partial(
+            name,
+            self.config.partials_dict,
+            self.config.partials_path,
+            self.config.partials_ext,
+            self.config.logger,
+            dynamic=dynamic,
+            kind="parent",
+        )
+        site_padding = work.partial_padding() if is_standalone else ""
+        left = (
+            site_padding.removeprefix(work.frame.padding)
+            if site_padding.startswith(work.frame.padding)
+            else site_padding
+        )
+        padding = work.frame.padding + left if left.isspace() else work.frame.padding
+        frame = work.frame.with_context(self.config.default_delimiters, padding)
+        frame = frame.with_overrides(_parent_overrides(body))
+
+        def append_parent(result: str, terminal_padding: str) -> None:
+            result, terminal_padding = _restore_enclosing_padding(
+                result, terminal_padding, work.frame.padding
+            )
+            work.append(result, terminal_padding=terminal_padding)
+
+        _push_work(active, self._template_work(parent, frame, append_parent))
 
     def _render_token(
         self,
@@ -1023,12 +1435,36 @@ class ChevronRender:
         active: list[_RenderWork[None]],
     ) -> None:
         tag, key = token[:2]
+        source_line_has_content = work.source_line_has_content
+        if tag == "literal":
+            work.observe_source_literal(token)
+        elif tag != "parent":
+            work.source_line_has_content = True
+        if work.strip_parent_suffix and tag != "literal":
+            work.strip_parent_suffix = False
+        if work.restore_parent_suffix and tag != "literal":
+            work.restore_parent_suffix = False
         if _apply_control_token(work, tag, key):
+            if tag == "parent":
+                work.source_line_has_content = True
             return
 
         match tag:
             case "literal":
-                work.append(key.replace("\n", "\n" + work.frame.padding))
+                raw = token[2] if len(token) == 3 else key
+                key, work.restore_parent_suffix = _restore_parent_suffix(
+                    key, raw, work.restore_parent_suffix
+                )
+                key, work.strip_parent_suffix = _consume_parent_suffix(
+                    key, work.strip_parent_suffix
+                )
+                rendered = _apply_line_padding(key, work.frame.padding)
+                terminal_padding = (
+                    work.frame.padding
+                    if key.endswith(("\n", "\r")) and work.frame.padding
+                    else ""
+                )
+                work.append(rendered, terminal_padding=terminal_padding)
             case "variable" | "no escape":
                 self._render_interpolation(key, tag, work, active)
             case "section":
@@ -1047,6 +1483,17 @@ class ChevronRender:
                 )
             case "partial":
                 self._render_partial(key, work, active)
+            case "parent":
+                self._render_parent(key, work, active)
+                work.source_line_has_content = True
+            case "block":
+                self._render_block(
+                    key,
+                    work,
+                    active,
+                    opening_is_standalone=not source_line_has_content,
+                    source_line_has_content=source_line_has_content,
+                )
 
     def _render_interpolation(
         self,
@@ -1057,7 +1504,7 @@ class ChevronRender:
     ) -> None:
         value, explicit = self.resolve(key, work.frame)
 
-        def append_value(result: TemplateData) -> None:
+        def append_value(result: TemplateData, _terminal_padding: str = "") -> None:
             work.append(_interpolation_text(result, tag))
 
         if not isinstance(value, Callable):

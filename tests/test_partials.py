@@ -3,6 +3,7 @@ import sys
 import pytest
 
 import chevron
+from inheritance_cases import INHERITANCE_CASES, InheritanceCase
 
 
 def test_unicode_partial_content_renders_unchanged() -> None:
@@ -162,3 +163,76 @@ def test_dynamic_partial_respects_explicit_lambda_policy() -> None:
         == ""
     )
     assert not called
+
+
+def test_parent_partial_renders_default_and_override_blocks() -> None:
+    partials = {"layout": "<main>{{$body}}default {{name}}{{/body}}</main>"}
+
+    assert (
+        chevron.render(
+            "{{<layout}}{{/layout}}", {"name": "Ada"}, partials_dict=partials
+        )
+        == "<main>default Ada</main>"
+    )
+    assert (
+        chevron.render(
+            "{{<layout}}{{$body}}override {{name}}{{/body}}{{/layout}}",
+            {"name": "Ada"},
+            partials_dict=partials,
+        )
+        == "<main>override Ada</main>"
+    )
+
+
+def test_parent_override_uses_the_parent_expansion_scope() -> None:
+    assert (
+        chevron.render(
+            "{{<parent}}{{$block}}child {{fruit}}{{/block}}{{/parent}}",
+            {"fruit": "apples", "nested": {"fruit": "bananas"}},
+            partials_dict={
+                "parent": "{{#nested}}{{$block}}parent {{fruit}}{{/block}}{{/nested}}"
+            },
+        )
+        == "child bananas"
+    )
+
+
+def test_missing_dynamic_parent_renders_empty() -> None:
+    assert chevron.render("before {{<*layout}}{{/*layout}} after") == "before  after"
+
+
+def test_parent_override_preserves_literal_tokens() -> None:
+    tokens = [
+        ("parent", "layout"),
+        ("block", "body"),
+        ("literal", "{{name}}"),
+        ("end", "body"),
+        ("end", "layout"),
+    ]
+
+    assert (
+        chevron.render(
+            tokens,
+            {"name": "Ada"},
+            partials_dict={"layout": "{{$body}}default{{/body}}"},
+        )
+        == "{{name}}"
+    )
+
+
+def test_intrinsic_block_reindentation_preserves_trailing_spaces() -> None:
+    assert (
+        chevron.render(
+            "{{<parent}}{{$block}}hello  {{/block}}{{/parent}}",
+            partials_dict={"parent": "Hi,\n{{$block}}\n  default\n{{/block}}\n"},
+        )
+        == "Hi,\n  hello  "
+    )
+
+
+@pytest.mark.parametrize("case", INHERITANCE_CASES, ids=lambda case: case.name)
+def test_inheritance_case(case: InheritanceCase) -> None:
+    assert (
+        chevron.render(case.template, case.render_data(), partials_dict=case.partials)
+        == case.expected
+    )
