@@ -231,7 +231,9 @@ async def test_async_missing_dynamic_parent_renders_empty(
     anyio_backend: str,
 ) -> None:
     assert (
-        await chevron.async_render("before {{<*layout}}{{/*layout}} after")
+        await chevron.async_render(
+            "before {{<*layout}}{{$body}}discard{{/body}}{{/*layout}} after"
+        )
         == "before  after"
     )
 
@@ -253,9 +255,9 @@ async def test_async_parent_override_preserves_literal_tokens(
         await chevron.async_render(
             tokens,
             {"name": "Ada"},
-            partials_dict={"layout": "{{$body}}default{{/body}}"},
+            partials_dict={"layout": "parent:[{{$body}}default{{/body}}]"},
         )
-        == "{{name}}"
+        == "parent:[{{name}}]"
     )
 
 
@@ -398,6 +400,25 @@ async def test_async_render_awaits_each_declared_lambda_protocol(
             },
         )
         == "declared|declared|compatibility"
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_section_lambda_does_not_leave_terminal_padding(
+    anyio_backend: str,
+) -> None:
+    @chevron.section
+    async def section(_body: str) -> str:
+        return "value\n"
+
+    assert (
+        await chevron.async_render(
+            "{{#section}}ignored{{/section}}",
+            padding="  ",
+            lambdas={"section": section},
+        )
+        == "value\n"
     )
 
 

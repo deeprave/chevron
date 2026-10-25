@@ -198,7 +198,10 @@ def test_parent_override_uses_the_parent_expansion_scope() -> None:
 
 
 def test_missing_dynamic_parent_renders_empty() -> None:
-    assert chevron.render("before {{<*layout}}{{/*layout}} after") == "before  after"
+    assert (
+        chevron.render("before {{<*layout}}{{$body}}discard{{/body}}{{/*layout}} after")
+        == "before  after"
+    )
 
 
 def test_parent_override_preserves_literal_tokens() -> None:
@@ -214,9 +217,9 @@ def test_parent_override_preserves_literal_tokens() -> None:
         chevron.render(
             tokens,
             {"name": "Ada"},
-            partials_dict={"layout": "{{$body}}default{{/body}}"},
+            partials_dict={"layout": "parent:[{{$body}}default{{/body}}]"},
         )
-        == "{{name}}"
+        == "parent:[{{name}}]"
     )
 
 

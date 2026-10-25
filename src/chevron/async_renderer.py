@@ -314,7 +314,7 @@ class AsyncChevronRender:
                 result_frame = work.frame.with_context(body.opening, work.frame.padding)
 
                 async def append_result(result: str, _terminal_padding: str) -> None:
-                    work.append(result)
+                    work.append(result, _terminal_padding)
 
                 await self._schedule_result(
                     value(body.source()),

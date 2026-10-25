@@ -305,7 +305,7 @@ def tokenize(
             # Partials need to keep the spaces on their left
             if tag_type not in ("partial", "parent"):
                 # But other tags don't
-                literal = literal.rstrip(" ")
+                literal = literal.rstrip(" \t")
 
         # Start yielding
         # Ignore literals that are empty

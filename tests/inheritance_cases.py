@@ -88,6 +88,12 @@ INHERITANCE_CASES = (
         partials={"parent": "Hi,\r  {{$body}}\r  {{/body}}\r"},
         expected="Hi,\r  one\r  two\r",
     ),
+    InheritanceCase(
+        name="tab-indented standalone block tags leave no tabs in output",
+        template="{{<parent}}\n\t{{$block}}\n\tone\n\t{{/block}}\n{{/parent}}\n",
+        partials={"parent": "{{$block}}default{{/block}}\n"},
+        expected="one\n\n",
+    ),
     *(
         InheritanceCase(
             name=f"standalone block opener ignores trailing {label}",
