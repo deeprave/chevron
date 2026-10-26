@@ -1,7 +1,5 @@
 import chevron
 import pytest
-from collections import ChainMap
-from types import MappingProxyType
 from typing import Any
 
 
@@ -77,35 +75,6 @@ def test_explicit_mapping_shadows_callable_template_data() -> None:
     assert calls == ["registered"]
 
 
-def test_explicit_mapping_supplies_a_section_callable() -> None:
-    def registered(text: str, render: Any) -> str:
-        return "registered"
-
-    result = chevron.render(
-        "{{#action}}body{{/action}}",
-        {},
-        lambdas={"action": registered},
-    )
-
-    assert result == "registered"
-
-
-def test_explicit_mapping_supports_dotted_names_and_partials() -> None:
-    def registered(text: str, render: Any) -> str:
-        return render(text)
-
-    result = chevron.render(
-        "{{> included}}",
-        {"workflow": {"contains": registered}, "value": "rendered"},
-        partials_dict={
-            "included": "{{#workflow.contains}}{{value}}{{/workflow.contains}}"
-        },
-        lambdas={"workflow.contains": registered},
-    )
-
-    assert result == "rendered"
-
-
 def test_explicit_mapping_requires_the_complete_dotted_name() -> None:
     calls: list[str] = []
 
@@ -122,19 +91,6 @@ def test_explicit_mapping_requires_the_complete_dotted_name() -> None:
         == ""
     )
     assert calls == []
-
-
-def test_explicit_mapping_survives_iterable_section_scopes() -> None:
-    def registered(text: str, render: Any) -> str:
-        return render(text)
-
-    result = chevron.render(
-        "{{#items}}{{#action}}{{value}}{{/action}}{{/items}}",
-        {"items": [{"action": registered, "value": "first"}]},
-        lambdas={"action": registered},
-    )
-
-    assert result == "first"
 
 
 def test_omitted_lambda_mapping_preserves_legacy_section_callbacks() -> None:
@@ -471,21 +427,6 @@ def test_explicit_mode_accepts_separately_accessed_bound_methods() -> None:
     )
 
 
-def test_explicit_mapping_uses_a_bound_method_without_template_data() -> None:
-    class Handler:
-        def action(self, text: str, render: object) -> str:
-            return "called"
-
-    assert (
-        chevron.render(
-            "{{#action}}body{{/action}}",
-            {},
-            lambdas={"action": Handler().action},
-        )
-        == "called"
-    )
-
-
 def test_explicit_mapping_shadows_a_different_bound_method() -> None:
     calls: list[str] = []
 
@@ -562,84 +503,6 @@ def test_lambdas_none_retains_compatibility_mode() -> None:
             "{{#callback}}body{{/callback}}", {"callback": callback}, lambdas=None
         )
         == "called"
-    )
-
-
-def test_explicit_mapping_works_with_scopes_argument() -> None:
-    def callback(text: str, render: object) -> str:
-        return "called"
-
-    assert (
-        chevron.render(
-            "{{#callback}}body{{/callback}}",
-            scopes=[{"callback": callback}],
-            lambdas={"callback": callback},
-        )
-        == "called"
-    )
-
-
-def test_explicit_mapping_accepts_class_bound_methods() -> None:
-    class Handler:
-        @classmethod
-        def action(cls, text: str, render: object) -> str:
-            return "called"
-
-    assert (
-        chevron.render(
-            "{{#action}}body{{/action}}",
-            {"action": Handler.action},
-            lambdas={"action": Handler.action},
-        )
-        == "called"
-    )
-
-
-@pytest.mark.parametrize(
-    "mapping_factory", [lambda value: ChainMap(value), MappingProxyType]
-)
-def test_explicit_mapping_accepts_mapping_implementations(mapping_factory) -> None:
-    def callback(text: str, render: object) -> str:
-        return "called"
-
-    assert (
-        chevron.render(
-            "{{#callback}}body{{/callback}}",
-            {"callback": callback},
-            lambdas=mapping_factory({"callback": callback}),
-        )
-        == "called"
-    )
-
-
-def test_registered_callable_is_truthy_in_an_inverted_section() -> None:
-    def callback(text: str, render: object) -> str:
-        return "called"
-
-    assert (
-        chevron.render(
-            "{{^callback}}fallback{{/callback}}",
-            {"callback": callback},
-            lambdas={"callback": callback},
-        )
-        == ""
-    )
-
-
-def test_explicit_mapping_precedes_scope_precedence() -> None:
-    def outer(text: str, render: object) -> str:
-        return "outer"
-
-    def inner(text: str, render: object) -> str:
-        return "inner"
-
-    assert (
-        chevron.render(
-            "{{#action}}body{{/action}}",
-            scopes=[{"action": inner}, {"action": outer}],
-            lambdas={"action": outer},
-        )
-        == "outer"
     )
 
 

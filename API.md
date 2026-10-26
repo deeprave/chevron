@@ -2,10 +2,7 @@
 
 Chevron renders [Mustache](https://mustache.github.io/) templates to a complete string. It supports synchronous rendering by default and optional AnyIO-based asynchronous rendering for applications already running on asyncio or Trio.
 
-For Mustache language syntax and general examples, see the [upstream Mustache
-manual](https://github.com/mustache/mustache.github.com/blob/115baf277db1adc09354871271a7ec8dd7b73a5a/mustache.5.html).
-This reference is pinned to its upstream revision; this document describes
-Chevron's API and supported behaviour.
+For Mustache language syntax and general examples, see the [upstream Mustache manual](https://github.com/mustache/mustache.github.com/blob/115baf277db1adc09354871271a7ec8dd7b73a5a/mustache.5.html). This reference is pinned to its upstream revision; this document describes Chevron's API and supported behaviour.
 
 `async_render()` requires a caller-owned running runtime. Chevron never creates or selects an event loop.
 
@@ -43,14 +40,9 @@ Chevron rejects absolute names, parent traversal, and resolved paths outside tha
 
 ### Dynamic partial and parent names
 
-Prefix a partial name with `*` to choose the partial from the active template
-context. The remainder is a normal dotted name; its resolved text is used once
-as the partial name. Resolving a dynamic name does not add a scope, so the
-selected partial retains the surrounding context.
+Prefix a partial name with `*` to choose the partial from the active template context. The remainder is a normal dotted name; its resolved text is used once as the partial name. Resolving a dynamic name does not add a scope, so the selected partial retains the surrounding context.
 
-Because `*` introduces this syntax, a literal partial name cannot begin with
-`*`. This is a small compatibility difference from Chevron 0.14.0, which
-treated such names literally.
+Because `*` introduces this syntax, a literal partial name cannot begin with `*`. This is a small compatibility difference from Chevron 0.14.0, which treated such names literally.
 
 ```python
 chevron.render(
@@ -64,17 +56,11 @@ chevron.render(
 # "[first][second]"
 ```
 
-Missing names, unavailable partials, and double dereferences such as
-`{{>**partial}}` render nothing. Only non-empty strings can select a dynamic
-partial; values such as `None`, `False`, and numbers render nothing.
+Missing names, unavailable partials, and double dereferences such as `{{>**partial}}` render nothing. Only non-empty strings can select a dynamic partial; values such as `None`, `False`, and numbers render nothing.
 
-Dynamic names use the same mapped-partial precedence and opt-in filesystem
-containment rules as ordinary partials. With `partials_path`, selector data can
-choose any contained partial file. Treat that data as trusted; to restrict
-selection to an allow-list, omit `partials_path` and use `partials_dict` only.
+Dynamic names use the same mapped-partial precedence and opt-in filesystem containment rules as ordinary partials. With `partials_path`, selector data can choose any contained partial file. Treat that data as trusted; to restrict selection to an allow-list, omit `partials_path` and use `partials_dict` only.
 
-The same single-dereference form is available for parent templates. A parent
-can expose named blocks, and the invoking template can supply replacements:
+The same single-dereference form is available for parent templates. A parent can expose named blocks, and the invoking template can supply replacements:
 
 ```python
 chevron.render(
@@ -85,16 +71,11 @@ chevron.render(
 # "<main>Hello, Ada.</main>"
 ```
 
-Parent and block tags preserve ordinary partial lookup, active scope,
-standalone-line, and indentation behaviour. A missing dynamic parent renders
-the entire parent invocation as empty.
+Parent and block tags preserve ordinary partial lookup, active scope, standalone-line, and indentation behaviour. A missing dynamic parent renders the entire parent invocation as empty.
 
 ### Compatibility
 
-Chevron 0.16.0 reserves `$` and `<` as named-block and parent prefixes. As a
-result, `{{$name}}` and `{{<name}}` are no longer interpolations of variables
-whose names begin with those characters; they are opening tags and must have
-matching closing tags.
+Chevron 0.17.0 reserves `$` and `<` as named-block and parent prefixes. As a result, `{{$name}}` and `{{<name}}` are no longer interpolations of variables whose names begin with those characters; they are opening tags and must have matching closing tags.
 
 ## Lambdas
 
@@ -178,8 +159,7 @@ result = await chevron.async_render(
 )
 ```
 
-Async standard-section lambdas receive the literal section body and may return
-renderable template source:
+Async standard-section lambdas receive the literal section body and may return renderable template source:
 
 ```python
 @chevron.section
@@ -197,8 +177,7 @@ assert (
 )
 ```
 
-Async compatibility lambdas receive an awaitable callback that preserves the
-active render configuration and can add truthy temporary data:
+Async compatibility lambdas receive an awaitable callback that preserves the active render configuration and can add truthy temporary data:
 
 ```python
 @chevron.compat
@@ -217,10 +196,7 @@ assert (
 
 Async template readers and async section iterables are supported. Chevron uses AnyIO's asynchronous file API for its own filesystem partials. It adapts ordinary synchronous readers in a worker because regular Python file objects have no portable native asynchronous interface. Do not perform blocking I/O in application callbacks; use your runtime or AnyIO explicitly when needed.
 
-Async readers must return text. Ordinary readers may also return an awaitable
-text result; Chevron invokes their `read()` method in an AnyIO worker and
-awaits that result on the render task. A synchronous `render()` call rejects an
-awaitable reader result and directs the caller to `async_render()`.
+Async readers must return text. Ordinary readers may also return an awaitable text result; Chevron invokes their `read()` method in an AnyIO worker and awaits that result on the render task. A synchronous `render()` call rejects an awaitable reader result and directs the caller to `async_render()`.
 
 ```python
 class Template:
@@ -236,8 +212,7 @@ async def people():
 assert await chevron.async_render(Template(), {"people": people()}) == "Ada;Grace;"
 ```
 
-Chevron never moves application callbacks into a worker because that would
-change their thread affinity and context. Adapt a blocking callback explicitly:
+Chevron never moves application callbacks into a worker because that would change their thread affinity and context. Adapt a blocking callback explicitly:
 
 ```python
 import anyio
@@ -268,5 +243,4 @@ chevron.render("{{missing}}", logger=logger, log_level=logging.WARNING)
 
 `log_level=logging.INFO` includes render lifecycle messages, and `logging.DEBUG` adds bounded resolution and partial decisions. Logging is synchronous for both APIs, so supplied handlers should remain minimal; configure queue-backed logging through the standard logging package if required.
 
-Missing or unreadable partials render empty as normal Mustache behaviour;
-partial-resolution details are available only at `logging.DEBUG`.
+Missing or unreadable partials render empty as normal Mustache behaviour; partial-resolution details are available only at `logging.DEBUG`.

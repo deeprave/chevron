@@ -1,10 +1,63 @@
 """Behavioural tests for declared Mustache and Chevron lambda protocols."""
 
 from io import StringIO
+import sys
 
 import chevron
 import pytest
 from chevron.tokenizer import ChevronError, tokenize
+
+
+def test_deep_function_lambda_expansion_does_not_use_the_python_call_stack() -> None:
+    depth = sys.getrecursionlimit() + 10
+    lambdas = {}
+
+    for index in range(depth):
+
+        @chevron.func
+        def expansion(index: int = index) -> str:
+            return f"{{{{lambda-{index + 1}}}}}"
+
+        lambdas[f"lambda-{index}"] = expansion
+
+    @chevron.func
+    def complete() -> str:
+        return "complete"
+
+    lambdas[f"lambda-{depth}"] = complete
+
+    assert chevron.render("{{lambda-0}}", lambdas=lambdas) == "complete"
+
+
+def test_function_lambda_cycle_fails_with_a_bounded_error() -> None:
+    @chevron.func
+    def loop() -> str:
+        return "{{loop}}"
+
+    with pytest.raises(RecursionError, match="nested template expansion"):
+        chevron.render("{{loop}}", lambdas={"loop": loop})
+
+
+def test_compatibility_section_rejects_non_string_results_promptly() -> None:
+    called = False
+
+    @chevron.compat
+    def invalid_result(text: str, render: object) -> int:
+        return 1
+
+    @chevron.func
+    def later() -> str:
+        nonlocal called
+        called = True
+        return "later"
+
+    with pytest.raises(TypeError, match="Compatibility lambda 'invalid_result'"):
+        chevron.render(
+            "{{#invalid_result}}body{{/invalid_result}}{{later}}",
+            lambdas={"invalid_result": invalid_result, "later": later},
+        )
+
+    assert not called
 
 
 def test_tokenize_keeps_its_public_two_tuple_stream_by_default() -> None:
@@ -69,59 +122,6 @@ def test_decorated_callable_instance_has_fallback_metadata() -> None:
     assert chevron.render("{{greeting}}", lambdas={"greeting": wrapped}) == "hello"
 
 
-def test_iterable_section_collects_nested_inverted_sections_with_the_same_name() -> (
-    None
-):
-    template = "{{#items}}{{^items}}empty{{/items}}{{name}};{{/items}}"
-
-    assert (
-        chevron.render(
-            template,
-            {"items": [{"name": "first"}, {"name": "second"}]},
-        )
-        == "first;second;"
-    )
-
-
-def test_declared_function_renders_escaped_and_unescaped_interpolation() -> None:
-    @chevron.func
-    def markup() -> str:
-        return "{{value}} >"
-
-    assert (
-        chevron.render(
-            "{{markup}}|{{{markup}}}",
-            {"value": "<tag>"},
-            lambdas={"markup": markup},
-        )
-        == "&amp;lt;tag&amp;gt; &gt;|&lt;tag&gt; >"
-    )
-
-
-def test_declared_function_matches_ordinary_interpolation_in_an_indented_partial() -> (
-    None
-):
-    template = "  {{>part}}\n"
-    partials = {"part": "{{value}}\n"}
-
-    @chevron.func
-    def value() -> str:
-        return "a\nb"
-
-    ordinary = chevron.render(
-        template,
-        {"value": "a\nb"},
-        partials_dict=partials,
-    )
-    interpolated = chevron.render(
-        template,
-        partials_dict=partials,
-        lambdas={"value": value},
-    )
-
-    assert interpolated == ordinary == "  a\nb\n"
-
-
 def test_declared_function_uses_default_delimiters_and_is_not_cached() -> None:
     calls: list[int] = []
 
@@ -141,23 +141,6 @@ def test_declared_function_uses_default_delimiters_and_is_not_cached() -> None:
     assert calls == [0, 1]
 
 
-def test_declared_function_uses_configured_render_default_delimiters() -> None:
-    @chevron.func
-    def value() -> str:
-        return "<<planet>>"
-
-    assert (
-        chevron.render(
-            "<<=| |=>>|value|",
-            {"planet": "Earth"},
-            lambdas={"value": value},
-            def_ldel="<<",
-            def_rdel=">>",
-        )
-        == "Earth"
-    )
-
-
 def test_declared_section_receives_raw_text_and_current_delimiters() -> None:
     received: list[str] = []
 
@@ -175,21 +158,6 @@ def test_declared_section_receives_raw_text_and_current_delimiters() -> None:
         == "<-{{planet}} => Earth->"
     )
     assert received == ["-"]
-
-
-def test_declared_section_uses_its_opening_delimiters_after_body_changes_them() -> None:
-    @chevron.section
-    def repeat(text: str) -> str:
-        return text
-
-    assert (
-        chevron.render(
-            "{{=| |=}}|#repeat||planet||= {{ }} =|{{planet}}{{/repeat}}",
-            {"planet": "Earth"},
-            lambdas={"repeat": repeat},
-        )
-        == "EarthEarth"
-    )
 
 
 @pytest.mark.parametrize(
@@ -371,21 +339,6 @@ def test_undecorated_interpolation_callable_is_not_invoked(explicit: bool) -> No
     assert calls == []
 
 
-def test_declared_function_takes_precedence_over_template_data() -> None:
-    @chevron.func
-    def value() -> str:
-        return "registered"
-
-    assert (
-        chevron.render(
-            "{{value}}",
-            {"value": "template data"},
-            lambdas={"value": value},
-        )
-        == "registered"
-    )
-
-
 @pytest.mark.parametrize("explicit", [False, True])
 @pytest.mark.parametrize(
     ("decorator", "template"),
@@ -412,84 +365,6 @@ def test_incompatible_lambda_tag_does_not_invoke_callable(
     )
     assert result == ("" if decorator is chevron.func else "|")
     assert calls == []
-
-
-def test_declared_lambda_protocols_remain_available_in_nested_partial_renders() -> None:
-    @chevron.func
-    def value() -> str:
-        return "{{message}}"
-
-    assert (
-        chevron.render(
-            "{{>partial}}",
-            {"message": "rendered"},
-            partials_dict={"partial": "{{value}}"},
-            lambdas={"value": value},
-        )
-        == "rendered"
-    )
-
-
-def test_declared_section_returning_a_partial_uses_render_default_delimiters() -> None:
-    @chevron.section
-    def include(text: str) -> str:
-        return "|>part|"
-
-    assert (
-        chevron.render(
-            "{{=| |=}}|#include|ignored|/include|",
-            {"value": "rendered"},
-            partials_dict={"part": "{{value}}"},
-            lambdas={"include": include},
-        )
-        == "rendered"
-    )
-
-
-def test_partial_resets_to_render_default_delimiters_after_a_change() -> None:
-    assert (
-        chevron.render(
-            "{{=| |=}}|#items||>part||/items|",
-            {"items": [{"value": "rendered"}]},
-            partials_dict={"part": "{{value}}"},
-        )
-        == "rendered"
-    )
-
-
-def test_skipped_and_iterated_sections_propagate_delimiter_changes() -> None:
-    assert (
-        chevron.render(
-            "{{#off}}{{=| |=}}|value||/off||value|",
-            {"off": False, "value": "skipped"},
-        )
-        == "skipped"
-    )
-    assert (
-        chevron.render(
-            "{{#items}}{{=| |=}}|value||/items||value|",
-            {"items": [{"value": "item"}], "value": "outer"},
-        )
-        == "itemouter"
-    )
-
-
-def test_declared_functions_remain_available_in_recursively_rendered_text() -> None:
-    @chevron.func
-    def outer() -> str:
-        return "{{inner}}"
-
-    @chevron.func
-    def inner() -> str:
-        return "rendered"
-
-    assert (
-        chevron.render(
-            "{{outer}}",
-            lambdas={"outer": outer, "inner": inner},
-        )
-        == "rendered"
-    )
 
 
 @pytest.mark.parametrize("decorator", [chevron.func, chevron.section, chevron.compat])

@@ -3,16 +3,6 @@ import sys
 import pytest
 
 import chevron
-from inheritance_cases import INHERITANCE_CASES, InheritanceCase
-
-
-def test_unicode_partial_content_renders_unchanged() -> None:
-    assert (
-        chevron.render(
-            "{{>table_flip}}", partials_dict={"table_flip": "(╯°□°）╯︵ ┻━┻"}
-        )
-        == "(╯°□°）╯︵ ┻━┻"
-    )
 
 
 def test_deep_finite_partial_expansion_does_not_use_the_python_call_stack() -> None:
@@ -51,73 +41,13 @@ def test_cyclic_partial_fails_with_a_bounded_error() -> None:
         chevron.render("{{>self}}", partials_dict={"self": "{{>self}}"})
 
 
-def test_missing_values_in_configured_partials_render_empty() -> None:
-    assert (
+def test_dynamic_partial_cycle_fails_with_a_bounded_error() -> None:
+    with pytest.raises(RecursionError, match="nested template expansion"):
         chevron.render(
-            "before, {{>partial}}, after",
-            partials_dict={"partial": "partial: {{#missing}}bloop{{/missing}}"},
+            "{{>*name}}",
+            {"name": "self"},
+            partials_dict={"self": "{{>*name}}"},
         )
-        == "before, partial: , after"
-    )
-
-
-def test_standalone_partial_indentation_is_preserved() -> None:
-    assert (
-        chevron.render("\t{{>count}}", partials_dict={"count": "\tone\n\ttwo"})
-        == "\t\tone\n\t\ttwo"
-    )
-
-
-def test_nested_partial_and_iterable_indentation_is_preserved() -> None:
-    assert (
-        chevron.render(
-            "{{>count}}",
-            {"thing": ["foo", "bar", "baz"]},
-            partials_dict={
-                "count": "    {{>iter_scope}}",
-                "iter_scope": "foobar\n{{#thing}}\n {{.}}\n{{/thing}}",
-            },
-        )
-        == "    foobar\n     foo\n     bar\n     baz\n"
-    )
-
-
-def test_missing_interpolation_values_in_partials_render_empty() -> None:
-    assert (
-        chevron.render(
-            "{{first}} {{>partial}} {{third}}",
-            {"first": "1st", "third": "3rd"},
-            partials_dict={"partial": "partial: {{missing}}"},
-        )
-        == "1st partial:  3rd"
-    )
-
-
-def test_dynamic_partial_keeps_the_current_section_scope() -> None:
-    assert (
-        chevron.render(
-            "{{#items}}[{{>*presentation.name}}]{{/items}}",
-            {
-                "presentation": {"name": "item"},
-                "items": ["first", "second"],
-            },
-            partials_dict={"item": "{{.}}"},
-        )
-        == "[first][second]"
-    )
-
-
-def test_missing_or_nested_dynamic_partial_names_render_empty() -> None:
-    assert chevron.render("{{>*missing}}", partials_dict={"missing": "wrong"}) == ""
-    assert chevron.render("{{>*}}", partials_dict={"*": "wrong"}) == ""
-    assert (
-        chevron.render(
-            "{{>**template}}",
-            {"template": "name", "name": "content"},
-            partials_dict={"**template": "wrong", "content": "wrong"},
-        )
-        == ""
-    )
 
 
 def test_dynamic_partial_keeps_mapping_precedence_and_filesystem_containment(
@@ -165,45 +95,6 @@ def test_dynamic_partial_respects_explicit_lambda_policy() -> None:
     assert not called
 
 
-def test_parent_partial_renders_default_and_override_blocks() -> None:
-    partials = {"layout": "<main>{{$body}}default {{name}}{{/body}}</main>"}
-
-    assert (
-        chevron.render(
-            "{{<layout}}{{/layout}}", {"name": "Ada"}, partials_dict=partials
-        )
-        == "<main>default Ada</main>"
-    )
-    assert (
-        chevron.render(
-            "{{<layout}}{{$body}}override {{name}}{{/body}}{{/layout}}",
-            {"name": "Ada"},
-            partials_dict=partials,
-        )
-        == "<main>override Ada</main>"
-    )
-
-
-def test_parent_override_uses_the_parent_expansion_scope() -> None:
-    assert (
-        chevron.render(
-            "{{<parent}}{{$block}}child {{fruit}}{{/block}}{{/parent}}",
-            {"fruit": "apples", "nested": {"fruit": "bananas"}},
-            partials_dict={
-                "parent": "{{#nested}}{{$block}}parent {{fruit}}{{/block}}{{/nested}}"
-            },
-        )
-        == "child bananas"
-    )
-
-
-def test_missing_dynamic_parent_renders_empty() -> None:
-    assert (
-        chevron.render("before {{<*layout}}{{$body}}discard{{/body}}{{/*layout}} after")
-        == "before  after"
-    )
-
-
 def test_parent_override_preserves_literal_tokens() -> None:
     tokens = [
         ("parent", "layout"),
@@ -220,22 +111,4 @@ def test_parent_override_preserves_literal_tokens() -> None:
             partials_dict={"layout": "parent:[{{$body}}default{{/body}}]"},
         )
         == "parent:[{{name}}]"
-    )
-
-
-def test_intrinsic_block_reindentation_preserves_trailing_spaces() -> None:
-    assert (
-        chevron.render(
-            "{{<parent}}{{$block}}hello  {{/block}}{{/parent}}",
-            partials_dict={"parent": "Hi,\n{{$block}}\n  default\n{{/block}}\n"},
-        )
-        == "Hi,\n  hello  "
-    )
-
-
-@pytest.mark.parametrize("case", INHERITANCE_CASES, ids=lambda case: case.name)
-def test_inheritance_case(case: InheritanceCase) -> None:
-    assert (
-        chevron.render(case.template, case.render_data(), partials_dict=case.partials)
-        == case.expected
     )

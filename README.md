@@ -1,4 +1,8 @@
-[![PyPI version](https://badge.fury.io/py/chevron-ng.svg)](https://badge.fury.io/py/chevron-ng)
+[![CI](https://img.shields.io/github/actions/workflow/status/deeprave/chevron/ci.yml?branch=main&label=CI&logo=github)](https://github.com/deeprave/chevron/actions/workflows/ci.yml)
+[![Maintenance](https://img.shields.io/badge/maintenance-active-brightgreen.svg)](https://github.com/deeprave/chevron)
+[![PyPI version](https://img.shields.io/pypi/v/chevron-ng.svg?logo=pypi&logoColor=white)](https://pypi.org/project/chevron-ng/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/chevron-ng.svg?logo=pypi&logoColor=white)](https://pypi.org/project/chevron-ng/)
+[![Python versions](https://img.shields.io/pypi/pyversions/chevron-ng.svg?logo=python&logoColor=white)](https://pypi.org/project/chevron-ng/)
 
 # Chevron
 
@@ -20,15 +24,11 @@ Render a template file with optional JSON data and a trusted partial directory:
 chevron greeting.mustache --data values.json --path partials
 ```
 
-Run `chevron --help` for delimiters, partial extension, and version options.
-The CLI retains its historical current-directory partial lookup default; use
-`--path` to select the directory deliberately.
+Run `chevron --help` for delimiters, partial extension, and version options. The CLI retains its historical current-directory partial lookup default; use `--path` to select the directory deliberately.
 
 ## Library use
 
-`render()` accepts template text, tokens, and ordinary file-like objects.
-Provide in-memory partials through `partials_dict`; filesystem lookup is
-disabled for library calls until `partials_path` is supplied.
+`render()` accepts template text, tokens, and ordinary file-like objects. Provide in-memory partials through `partials_dict`; filesystem lookup is disabled for library calls until `partials_path` is supplied.
 
 ```python
 chevron.render(
@@ -38,19 +38,11 @@ chevron.render(
 )
 ```
 
-For untrusted templates, supply an explicit `lambdas` mapping, including
-`lambdas={}` when no callable tags are allowed. This restricts callable
-template extensions but is not a general template sandbox: keep secrets and
-rich objects out of template data. Filesystem partials reject absolute names,
-parent traversal, and resolved paths outside the configured directory.
+For untrusted templates, supply an explicit `lambdas` mapping, including `lambdas={}` when no callable tags are allowed. This restricts callable template extensions but is not a general template sandbox: keep secrets and rich objects out of template data. Filesystem partials reject absolute names, parent traversal, and resolved paths outside the configured directory.
 
-Chevron is quiet by default. Use `warn=True` for recoverable diagnostics, or
-pass a standard-library logger for application-owned logging configuration.
+Chevron is quiet by default. Use `warn=True` for recoverable diagnostics, or pass a standard-library logger for application-owned logging configuration.
 
-Async rendering requires the optional `anyio` extra; applications using Trio
-also require the `trio` extra. For the complete synchronous and asynchronous
-API, lambda protocols, logging, resource ownership, and migration guidance,
-see the [API reference](https://github.com/deeprave/chevron/blob/main/API.md).
+Async rendering requires the optional `anyio` extra; applications using Trio also require the `trio` extra. For the complete synchronous and asynchronous API, lambda protocols, logging, resource ownership, and migration guidance, see the [API reference](https://github.com/deeprave/chevron/blob/main/API.md).
 
 Chevron retains a pinned copy of the Mustache specification fixtures, including lambda cases. See its [attribution](tests/fixtures/mustache-spec/README.md). If Chevron fails a Mustache case, please [open an issue](https://github.com/deeprave/chevron/issues/new).
 
