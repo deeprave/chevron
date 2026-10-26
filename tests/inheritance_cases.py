@@ -1,24 +1,8 @@
 """Chevron-owned source-template cases for inheritance behavior."""
 
-from collections.abc import AsyncIterator, Callable, Mapping
-from dataclasses import dataclass, field
-from typing import Any
+from collections.abc import AsyncIterator
 
-
-@dataclass(frozen=True)
-class InheritanceCase:
-    """One public rendering scenario shared by synchronous and async tests."""
-
-    name: str
-    template: str
-    expected: str
-    data: Mapping[str, Any] = field(default_factory=dict)
-    partials: Mapping[str, str] = field(default_factory=dict)
-    data_factory: Callable[[], Mapping[str, Any]] | None = None
-
-    def render_data(self) -> Mapping[str, Any]:
-        """Return fresh render data when the case owns a consumable value."""
-        return self.data_factory() if self.data_factory is not None else self.data
+from rendering_cases import RenderCase
 
 
 async def _one_async_item() -> AsyncIterator[bool]:
@@ -26,76 +10,76 @@ async def _one_async_item() -> AsyncIterator[bool]:
 
 
 INHERITANCE_CASES = (
-    InheritanceCase(
+    RenderCase(
         name="indented parent multiline override keeps one prefix",
         template="  {{<parent}}{{$body}}one\ntwo\n{{/body}}{{/parent}}\n",
         partials={"parent": "head\n{{$body}}\ndefault\n{{/body}}\nfooter\n"},
         expected="  head\n  one\n  two\n  footer\n",
     ),
-    InheritanceCase(
+    RenderCase(
         name="indented parent override keeps intrinsic indentation",
         template="  {{<parent}}{{$body}}one\ntwo\n{{/body}}{{/parent}}\n",
         partials={"parent": "head\n{{$body}}\n    default\n{{/body}}\nfooter\n"},
         expected="  head\n      one\n      two\n  footer\n",
     ),
-    InheritanceCase(
+    RenderCase(
         name="standalone parent ignores interpolation inside block arguments",
         template="{{<parent}}{{$body}}{{name}}{{/body}}{{/parent}}\nAfter",
         data={"name": "hello"},
         partials={"parent": "[{{$body}}default{{/body}}]"},
         expected="[hello]After",
     ),
-    InheritanceCase(
+    RenderCase(
         name="standalone parent ignores sections inside block arguments",
         template="{{<parent}}{{$body}}{{#show}}{{name}}{{/show}}{{/body}}{{/parent}}\nAfter",
         data={"name": "hello", "show": True},
         partials={"parent": "[{{$body}}default{{/body}}]"},
         expected="[hello]After",
     ),
-    InheritanceCase(
+    RenderCase(
         name="inline block override ignores default indentation",
         template="{{<parent}}{{$body}}hello{{/body}}{{/parent}}",
         partials={"parent": "before {{$body}}\n  default\n{{/body}} after"},
         expected="before hello after",
     ),
-    InheritanceCase(
+    RenderCase(
         name="dynamic parent uses its first direct block override",
         template="{{<*layout}}{{$body}}first{{/body}}{{$body}}later{{/body}}{{/*layout}}",
         data={"layout": "page"},
         partials={"page": "[{{$body}}default{{/body}}]"},
         expected="[first]",
     ),
-    InheritanceCase(
+    RenderCase(
         name="inline parent block override preserves leading whitespace",
         template="{{<parent}}{{$body}}  hello{{/body}}{{/parent}}",
         partials={"parent": "[{{$body}}default{{/body}}]"},
         expected="[  hello]",
     ),
-    InheritanceCase(
+    RenderCase(
         name="inline default block preserves parent line context",
         template="before {{$body}}{{<parent}}{{/parent}}\nAfter{{/body}}",
         partials={"parent": "parent"},
         expected="before parent\nAfter",
     ),
-    InheritanceCase(
+    RenderCase(
         name="unoverridden multiline block keeps authored indentation",
         template="{{$body}}\n  default\n{{/body}}\n",
         expected="  default\n",
     ),
-    InheritanceCase(
+    RenderCase(
         name="CR-only block override preserves indentation",
         template="{{<parent}}{{$body}}\r    one\r    two\r{{/body}}{{/parent}}\r",
         partials={"parent": "Hi,\r  {{$body}}\r  {{/body}}\r"},
         expected="Hi,\r  one\r  two\r",
     ),
-    InheritanceCase(
+    RenderCase(
         name="tab-indented standalone block tags leave no tabs in output",
         template="{{<parent}}\n\t{{$block}}\n\tone\n\t{{/block}}\n{{/parent}}\n",
         partials={"parent": "{{$block}}default{{/block}}\n"},
         expected="one\n\n",
     ),
     *(
-        InheritanceCase(
+        RenderCase(
             name=f"standalone block opener ignores trailing {label}",
             template=(
                 "{{<parent}}\n"
@@ -108,64 +92,64 @@ INHERITANCE_CASES = (
         )
         for label, suffix in (("space", " "), ("tab", "\t"))
     ),
-    InheritanceCase(
+    RenderCase(
         name="same named nested block uses its own default body",
         template="{{<layout}}{{$body}}OUT{{$body}}IN{{/body}}{{/body}}{{/layout}}",
         partials={"layout": "[{{$body}}default{{/body}}]"},
         expected="[OUTIN]",
     ),
-    InheritanceCase(
+    RenderCase(
         name="multiline override keeps indentation after interpolation",
         template="{{<parent}}{{$body}}\n  {{name}}  after\n{{/body}}{{/parent}}",
         data={"name": "value"},
         partials={"parent": "{{$body}}default{{/body}}"},
         expected="value  after\n",
     ),
-    InheritanceCase(
+    RenderCase(
         name="nonstandalone parent does not indent its later lines",
         template="  {{<parent}}x{{/parent}}",
         partials={"parent": "one\ntwo"},
         expected="  one\ntwo",
     ),
-    InheritanceCase(
+    RenderCase(
         name="indented parent preserves override trailing spaces",
         template="  {{<parent}}{{$body}}hello  {{/body}}{{/parent}}\n",
         partials={"parent": "Hi,\n{{$body}}\n  default\n{{/body}}\n"},
         expected="  Hi,\n    hello  ",
     ),
-    InheritanceCase(
+    RenderCase(
         name="empty standalone override leaves no synthetic prefix",
         template="{{<parent}}{{$body}}{{/body}}{{/parent}}\nAfter",
         partials={"parent": "before\n  {{$body}}\n    default\n  {{/body}}\n"},
         expected="before\nAfter",
     ),
-    InheritanceCase(
+    RenderCase(
         name="block preserves trailing interpolation whitespace",
         template="{{<parent}}{{$block}}{{{value}}}{{/block}}{{/parent}}",
         data={"value": "x\n  "},
         partials={"parent": "{{$block}}\n  default\n{{/block}}"},
         expected="  x\n  ",
     ),
-    InheritanceCase(
+    RenderCase(
         name="parent preserves trailing interpolation whitespace",
         template="  {{<parent}}{{/parent}}\n",
         data={"value": "x\n  "},
         partials={"parent": "{{{value}}}"},
         expected="  x\n  ",
     ),
-    InheritanceCase(
+    RenderCase(
         name="ignored parent body text does not cancel standalone indentation",
         template="  {{<parent}}\nignored\n  {{/parent}}\n",
         partials={"parent": "one\ntwo\n"},
         expected="  one\n  two\n",
     ),
-    InheritanceCase(
+    RenderCase(
         name="nested standalone partial restores enclosing indentation",
         template="  {{>outer}}\n",
         partials={"outer": "head\n{{>inner}}\ntail\n", "inner": "a\nb\n"},
         expected="  head\n  a\n  b\n  tail\n",
     ),
-    InheritanceCase(
+    RenderCase(
         name="nested standalone parent restores enclosing indentation",
         template="  {{<outer}}{{/outer}}\n",
         partials={
@@ -174,20 +158,20 @@ INHERITANCE_CASES = (
         },
         expected="  head\n  one\n  two\n  foot\n",
     ),
-    InheritanceCase(
+    RenderCase(
         name="multiline nonstandalone parent preserves its closing suffix",
         template="X{{<parent}}\n{{/parent}}\nAFTER",
         partials={"parent": "PARENT"},
         expected="XPARENT\nAFTER",
     ),
-    InheritanceCase(
+    RenderCase(
         name="multiline nonstandalone parent with block preserves closing suffix",
         template="X{{<parent}}\n{{$body}}override{{/body}}\n{{/parent}}\nAFTER",
         partials={"parent": "[{{$body}}default{{/body}}]"},
         expected="X[override]\nAFTER",
     ),
     *(
-        InheritanceCase(
+        RenderCase(
             name=f"{label} parent and block tags stay inside a skipped section",
             template=template,
             data=data,
@@ -221,13 +205,13 @@ INHERITANCE_CASES = (
             ),
         )
     ),
-    InheritanceCase(
+    RenderCase(
         name="standalone parent leaves a following blank line intact",
         template="{{<layout}}\n{{/layout}}\n\nAfter",
         partials={"layout": "parent"},
         expected="parent\nAfter",
     ),
-    InheritanceCase(
+    RenderCase(
         name="inline parent leaves following interpolation intact",
         template="{{<layout}}{{/layout}}{{name}}\nAfter",
         data={"name": "Ada"},
@@ -235,7 +219,7 @@ INHERITANCE_CASES = (
         expected="parentAda\nAfter",
     ),
     *(
-        InheritanceCase(
+        RenderCase(
             name=f"same-line standalone parent consumes {label} suffix",
             template=f"{{{{<parent}}}}{{{{/parent}}}}{suffix}After",
             partials={"parent": "parent"},
@@ -249,7 +233,7 @@ INHERITANCE_CASES = (
         )
     ),
     *(
-        InheritanceCase(
+        RenderCase(
             name=f"parent standalone status ignores {label} interpolation output",
             template="{{name}}{{<parent}}{{/parent}}\nAfter",
             data={"name": value},
@@ -261,21 +245,21 @@ INHERITANCE_CASES = (
             ("whitespace", "   ", "   parent\nAfter"),
         )
     ),
-    InheritanceCase(
+    RenderCase(
         name="section scalar preserves parent line context",
         template="{{#items}}{{<parent}}{{/parent}}\nAfter{{/items}}",
         data={"items": True},
         partials={"parent": "parent"},
         expected="parent\nAfter",
     ),
-    InheritanceCase(
+    RenderCase(
         name="section sequence preserves parent line context",
         template="{{#items}}{{<parent}}{{/parent}}\nAfter{{/items}}",
         data={"items": [True]},
         partials={"parent": "parent"},
         expected="parent\nAfter",
     ),
-    InheritanceCase(
+    RenderCase(
         name="section iterator preserves parent line context",
         template="{{#items}}{{<parent}}{{/parent}}\nAfter{{/items}}",
         partials={"parent": "parent"},
@@ -283,7 +267,7 @@ INHERITANCE_CASES = (
         data_factory=lambda: {"items": iter((True,))},
     ),
     *(
-        InheritanceCase(
+        RenderCase(
             name=f"ordinary partial indents {label} line endings",
             template=f"  {{{{>partial}}}}{ending}",
             partials={"partial": f"one{ending}two{ending}"},
@@ -292,7 +276,7 @@ INHERITANCE_CASES = (
         for label, ending in (("LF", "\n"), ("CRLF", "\r\n"), ("CR", "\r"))
     ),
     *(
-        InheritanceCase(
+        RenderCase(
             name=f"standalone comment and section use {label} line endings",
             template=(
                 f"before{ending}{{{{! comment }}}}{ending}{{{{#show}}}}{ending}"
@@ -307,7 +291,7 @@ INHERITANCE_CASES = (
 
 
 ASYNC_INHERITANCE_CASES = (
-    InheritanceCase(
+    RenderCase(
         name="section async iterable preserves parent line context",
         template="{{#items}}{{<parent}}{{/parent}}\nAfter{{/items}}",
         partials={"parent": "parent"},

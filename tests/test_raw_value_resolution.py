@@ -12,29 +12,6 @@ class FalseyCallable:
         return "called"
 
 
-class PreservedFalsey:
-    _CHEVRON_return_scope_when_falsy = True
-
-    def __bool__(self) -> bool:
-        return False
-
-    def __str__(self) -> str:
-        return "preserved"
-
-
-class EqualityError:
-    def __eq__(self, other: object) -> bool:
-        raise ValueError("equality failed")
-
-
-class TruthinessError:
-    def __eq__(self, other: object) -> bool:
-        return False
-
-    def __bool__(self) -> bool:
-        raise ValueError("truthiness failed")
-
-
 class FailingString:
     def __str__(self) -> str:
         raise RuntimeError("render failed")
@@ -82,70 +59,10 @@ def test_falsey_registered_callable_section_executes() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (0, "0|0|inverted"),
-        (False, "False|False|inverted"),
-        (None, "||inverted"),
-        ("", "||inverted"),
-        ([], "||inverted"),
-        ({}, "||inverted"),
-        (PreservedFalsey(), "preserved|preserved|inverted"),
-    ],
-)
-def test_ordinary_falsey_values_retain_tag_behaviour(
-    value: object, expected: str
-) -> None:
-    assert (
-        chevron.render(
-            "{{value}}|{{{value}}}|{{#value}}section{{/value}}"
-            "{{^value}}inverted{{/value}}",
-            {"value": value},
-        )
-        == expected
-    )
-
-
 @pytest.mark.parametrize("template", ["{{missing}}", "{{{missing}}}"])
 def test_missing_interpolation_renders_empty_and_warns(template: str, caplog) -> None:
     assert chevron.render(template, {}, warn=True) == ""
     assert caplog.messages == ["Could not find key 'missing'"]
-
-
-def test_missing_and_empty_sections_use_ordinary_falsey_behaviour() -> None:
-    assert (
-        chevron.render(
-            "{{#outer}}{{#empty}}section{{/empty}}{{^empty}}inverted{{/empty}}"
-            "{{/outer}}{{^missing}}missing{{/missing}}",
-            {"outer": {"empty": []}},
-        )
-        == "invertedmissing"
-    )
-
-
-@pytest.mark.parametrize("value", [EqualityError(), TruthinessError()])
-def test_coercion_errors_fall_back_to_later_scope(value: object) -> None:
-    assert (
-        chevron.render(
-            "{{value}}",
-            scopes=[{"value": value}, {"value": "fallback"}],
-        )
-        == "fallback"
-    )
-
-
-def test_dotted_lookup_does_not_fall_back_after_value_normalisation_fails() -> None:
-    assert (
-        chevron.render(
-            "{{a.b}}",
-            scopes=[
-                {"a": {"b": TruthinessError()}},
-                {"a": {"b": "outer value"}},
-            ],
-        )
-        == ""
-    )
 
 
 @pytest.mark.parametrize("explicit_lambdas", [False, True])

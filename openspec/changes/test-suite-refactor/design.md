@@ -17,14 +17,14 @@ fixture framework for Chevron-owned cases.
 
 **Goals:**
 
-- Establish an evidence-based inventory of collection/execution cost,
-  duplication, implementation-coupled tests, and coherent behavioral groups.
+- Establish an evidence-based inventory of rendering behavior coverage,
+  duplication, implementation-coupled tests, coherent behavioral groups, and
+  collection/execution cost.
 - Make shared template behavior readable as named, declarative Python cases
   executed through public synchronous and asynchronous entry points.
 - Keep failures local and intelligible while retaining asyncio and Trio
   coverage where asynchronous behavior is relevant.
-- Leave the suite at least as strong and no slower without an evidence-backed
-  reason.
+- Produce complete, maintainable regression evidence for the rendering engine.
 
 **Non-Goals:**
 
@@ -48,6 +48,14 @@ it is replaced by a public behavior assertion or removed if redundant.
 This prevents a mechanically smaller suite from losing regression coverage.
 Running broad test moves before the inventory would make performance and
 coverage changes impossible to attribute.
+
+### Coverage is primary; timing is diagnostic
+
+The refactor's purpose is complete, readable behavioral coverage, not a speed
+target. Collection and execution measurements provide context for decisions and
+help identify accidental expansion, but a measured slowdown is acceptable when
+the resulting cases protect distinct rendering behavior. Conversely, a speedup
+does not justify losing a meaningful behavior assertion.
 
 ### Use typed Python case collections for Chevron-owned template behavior
 
@@ -74,6 +82,14 @@ to more than one renderer. Resource-heavy, timing-sensitive, filesystem,
 concurrency, or callback-protocol tests remain focused topical tests unless an
 audit identifies meaningful common behavior.
 
+### Start with partial, inheritance, and whitespace behavior
+
+The first consolidation group is partial lookup and inheritance together with
+whitespace and standalone-line behavior. Its shared cases SHALL run through
+the public synchronous API and the public asynchronous API under both asyncio
+and Trio. This establishes the case format and runners before other groups are
+considered.
+
 ### Group by durable behavior and retain public-contract exceptions
 
 Move or consolidate only after identifying the behavior each test protects.
@@ -85,6 +101,79 @@ Do not create a generic `regressions` grouping: the underlying behavior is the
 test's home. Preserve focused tests for supported non-source template input,
 including token sequences, since a source-template case cannot exercise that
 public contract.
+
+### Expand only source-template input/output scenarios after the pilot
+
+The pilot demonstrates that a named case is a useful rendering-behavior
+regression test: it gives a template, ordinary rendering inputs, and the
+expected output, then runs through each public renderer. The next
+consolidation group is selected from the existing Chevron-owned tests using
+that same boundary. The maintained inventory is `rendering-case-audit.md` in
+this change.
+
+It includes value and scope resolution, ordinary and inverted sections, and
+source-level whitespace and delimiter behavior. It does not force tests into
+the case format merely because they ultimately call `render()`: errors,
+diagnostics, readers, filesystem access, cancellation, concurrency,
+token-sequence input, and lambda protocol dispatch need observable resource,
+lifecycle, or callback assertions beyond a template/output pair.
+
+Do not extend `RenderCase` into a general-purpose test DSL. In particular,
+callable and resource factories remain in focused tests unless a later
+selection identifies a small, clearly shared source-output contract that can
+be represented without obscuring its behavior.
+
+### Use a narrow lambda-case variant for output-only callable behavior
+
+`LambdaRenderCase` extends the ordinary case record only with a
+`lambdas_factory`. The factory creates a fresh mapping of declared callables
+for every render and is held as a private static method on the case module's
+namespace class. This keeps multiple related callables and any shared closure
+state contained within the individual case without adding a general setup
+hook.
+
+Synchronous lambda cases join both renderers. Async-only lambda cases join
+only the async collection, so they run under asyncio and Trio but are never
+passed to `render()`. Tests whose contract includes callback arguments,
+invocation counts, warnings, exception propagation, or explicit rejection
+remain focused tests.
+
+### Model initial delimiters as an ordinary rendering input
+
+`RenderCase` carries an explicit `initial_delimiters` pair. The runners pass
+it directly as `def_ldel` and `def_rdel`, allowing a single case to express
+initial custom-delimiter rendering through direct interpolation, partials, and
+declared lambda expansion. Do not introduce a generic render-options mapping.
+
+### Reuse lambda cases for explicit mapping output behavior
+
+The existing lambda-case variant also represents explicit `lambdas=` mapping
+behavior when output alone establishes the contract: supplied sections,
+dotted names within partials, iterable and scope precedence, registered
+callable truthiness, bound methods, and mapping implementations. Keep legacy
+implicit callbacks focused because `LambdaRenderCase` deliberately always
+supplies a mapping. Keep tests that observe exact invocation, rejection,
+warnings, mapping snapshots, or failures focused.
+
+### Use a filesystem-partial case only for ordinary file lookup
+
+`FilesystemPartialRenderCase` supplies a small relative file tree and an
+optional partial extension. Its dedicated runners materialise the tree in
+pytest's temporary directory and pass that directory as `partials_path`.
+This covers ordinary lookup, nested names, extension selection, mapping
+precedence, and missing files through each renderer.
+
+Containment, absolute or traversal paths, symlinks, file ownership,
+cancellation, blocking-I/O behavior, and diagnostics remain focused resource
+or security tests. The case variant must not attempt to model those concerns.
+
+### Reuse ordinary cases for async-iterable output
+
+`RenderCase.data_factory` already creates fresh consumable values, including
+async iterables. Keep ordinary async-iterable section output in the
+async-only collection, where it runs under asyncio and Trio. Do not create a
+new variant for iterator errors, consumption guarantees, cancellation, or
+ownership; those are lifecycle contracts and remain focused tests.
 
 ### Preserve conformance isolation and marker semantics
 
@@ -99,8 +188,8 @@ gate and lets ordinary behavioral coverage evolve independently.
 - [A shared case table conceals scenario purpose] → Require descriptive stable
   case names and keep topic-specific collections small.
 - [Parameterisation multiplies runtime] → Parameterize independent dimensions
-  only when each combination protects distinct behavior; use duration data to
-  verify the result.
+  only when each combination protects distinct behavior; use duration data as
+  context rather than a replacement for coverage.
 - [Consolidation removes edge coverage] → Preserve or replace every affected
   assertion with a public behavior case before deletion, then run focused and
   full suites.
@@ -113,7 +202,7 @@ gate and lets ordinary behavioral coverage evolve independently.
    beginning with template partial/inheritance and whitespace cases.
 2. Add the typed shared case collection and explicit sync/async public runners.
 3. Migrate equivalent cases, retaining focused public-contract exceptions.
-4. Repeat for only the groups justified by the inventory, validating duration,
-   collection, conformance, and full-suite results after each group.
+4. Repeat for only the groups justified by the inventory, using collection and
+   duration data to understand each migration's impact.
 5. Roll back any group migration by restoring its prior focused tests; no
    production data or runtime migration is involved.
