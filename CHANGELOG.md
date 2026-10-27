@@ -9,7 +9,7 @@ All notable changes to Chevron are documented in this file.
 ### Added
 
 - `async_render()` provides runtime-neutral async rendering for applications using asyncio or Trio. The optional `anyio` or `trio` extra enables it; async lambdas, readers, iterables, and filesystem partials are supported without a library-owned event loop.
-- Added `API.md` with complete synchronous and asynchronous API, lambda, partial, and logging guidance.
+- Added complete synchronous and asynchronous API, lambda, partial, and logging guidance.
 - Mustache inheritance supports parent templates and named-block overrides, including nested inheritance, scope preservation, recursion, standalone whitespace, and indentation.
 - Mustache dynamic names allow `{{>*name}}` to select one partial and `{{<*name}}...{{/*name}}` to select a parent from the active context while retaining the caller's scope, partial indentation, and partial lookup policy.
 

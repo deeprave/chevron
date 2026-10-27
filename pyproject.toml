@@ -41,6 +41,11 @@ trio = [
     "anyio[trio]>=4.14.0",
     "trio>=0.32.0",
 ]
+docs = [
+    "mike>=2.2.0",
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.8.0",
+]
 
 [dependency-groups]
 dev = [
