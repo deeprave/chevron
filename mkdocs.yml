@@ -1,0 +1,52 @@
+site_name: Chevron documentation
+site_description: A practical reference for Chevron's Mustache renderer
+site_url: https://deeprave.github.io/chevron/
+repo_url: https://github.com/deeprave/chevron
+repo_name: deeprave/chevron
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.footer
+    - navigation.indexes
+    - navigation.tabs
+    - search.highlight
+    - search.suggest
+    - toc.follow
+
+extra:
+  version:
+    provider: mike
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Template language:
+      - Overview: language/index.md
+      - Values and contexts: language/values-and-contexts.md
+      - Sections: language/sections.md
+      - Partials and layouts: language/partials-and-layouts.md
+      - Syntax and whitespace: language/syntax-and-whitespace.md
+      - Lambdas: language/lambdas.md
+  - API reference:
+      - render(): api/render.md
+      - async_render(): api/async-render.md
+      - chevron.tokenizer: api/tokenizer.md
+      - Diagnostics and logging: api/diagnostics.md
+  - Reference:
+      - Mustache and conformance: reference/mustache.md
+      - Chevron extensions: reference/extensions.md
+      - Compatibility: reference/compatibility.md
+
+strict: true
