@@ -15,10 +15,6 @@ theme:
     - search.suggest
     - toc.follow
 
-extra:
-  version:
-    provider: mike
-
 markdown_extensions:
   - admonition
   - pymdownx.highlight:
