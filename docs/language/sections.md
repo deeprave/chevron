@@ -4,6 +4,8 @@ Sections use `{{#name}}...{{/name}}`. They are the main way to express optional 
 
 Within a section whose value is a scalar, `{{.}}` interpolates that current value. For example, `{{#status}}Status: {{.}}{{/status}}` renders `Status: ready` when `status` is `"ready"`.
 
+Inverted sections use `{{^name}}...{{/name}}`. They select their content when `name` is missing, false, or empty, and skip it when `name` is truthy. Use an inverted section beside an ordinary section when a template needs a fallback for absent content.
+
 ## Repeating a section
 
 Sections are Mustache's loop construct: a section whose value is a list, tuple, or iterator renders its body once for each item. There is no separate loop syntax. This template renders a release summary:
