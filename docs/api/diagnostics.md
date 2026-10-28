@@ -15,8 +15,8 @@ html = chevron.render(
 )
 ```
 
-Pass a standard-library `logging.Logger` or `logging.LoggerAdapter` through `logger`. Chevron does not add handlers, change levels, or alter propagation; those remain application policy. A supplied logger takes precedence over `warn`.
+Pass a standard-library `logging.Logger` or `logging.LoggerAdapter` through `logger`, with `log_level` as its paired minimum level. Chevron does not add handlers, change levels, or alter propagation; those remain application policy. Supplying `logger` (and its optional `log_level`) replaces `warn`; `log_level` alone does not enable diagnostics.
 
-`warn=True` enables Chevron's historical default warning diagnostics. `log_level=logging.INFO` includes render lifecycle messages. `logging.DEBUG` adds bounded value-resolution and partial-selection decisions. Dynamic-partial diagnostics intentionally avoid recording the resolved selector value or template data.
+`warn=True` enables Chevron's historical default warning diagnostics. With a supplied logger, `log_level=logging.INFO` includes render lifecycle messages and `logging.DEBUG` adds bounded value-resolution and partial-selection decisions. Dynamic-partial diagnostics intentionally avoid recording the resolved selector value or template data.
 
 Logging is synchronous in both APIs. Use the standard logging package's queue-based handlers if a destination could block; Chevron does not require a special async logger or wrapper.
