@@ -28,7 +28,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/deeprave/chevron"
-Documentation = "https://deeprave.github.io/chevron/latest/"
+Documentation = "https://deeprave.github.io/chevron/"
 Repository = "https://github.com/deeprave/chevron"
 
 [project.scripts]
@@ -43,7 +43,6 @@ trio = [
     "trio>=0.32.0",
 ]
 docs = [
-    "mike>=2.2.0",
     "mkdocs>=1.6.1",
     "mkdocs-material>=9.8.0",
 ]

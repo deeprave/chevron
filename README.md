@@ -42,7 +42,7 @@ For untrusted templates, supply an explicit `lambdas` mapping, including `lambda
 
 Chevron is quiet by default. Use `warn=True` for recoverable diagnostics, or pass a standard-library logger for application-owned logging configuration.
 
-Async rendering requires the optional `anyio` extra; applications using Trio also require the `trio` extra. For the complete synchronous and asynchronous API, lambda protocols, logging, resource ownership, and migration guidance, see the [Chevron documentation](https://deeprave.github.io/chevron/latest/).
+Async rendering requires the optional `anyio` extra; applications using Trio also require the `trio` extra. For the complete synchronous and asynchronous API, lambda protocols, logging, resource ownership, and migration guidance, see the [Chevron documentation](https://deeprave.github.io/chevron/).
 
 Chevron retains a pinned copy of the Mustache specification fixtures, including lambda cases. See its [attribution](tests/fixtures/mustache-spec/README.md). If Chevron fails a Mustache case, please [open an issue](https://github.com/deeprave/chevron/issues/new).
 
