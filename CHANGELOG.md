@@ -4,6 +4,12 @@ All notable changes to Chevron are documented in this file.
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-28
+
+### Added
+
+- Expanded the documentation into a chaptered reference covering the Mustache language, rendering APIs, async rendering, diagnostics, compatibility, extensions, and tokenisation. It is published at [deeprave.github.io/chevron](https://deeprave.github.io/chevron/).
+
 ## [0.17.0] - 2026-10-26
 
 ### Added
