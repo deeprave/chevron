@@ -32,4 +32,4 @@ Pass a materialised token sequence when template source has already been tokeniz
 
 ## Errors
 
-Malformed template source raises `chevron.ChevronError`, a `SyntaxError` subclass. Direct-token structural errors also raise `ChevronError`, while malformed token values raise `TypeError`. An awaitable returned by a reader or lambda is rejected by `render()` with a `TypeError` that directs callers to [`async_render()`](async-render.md).
+Malformed template source raises `chevron.ChevronError`, a `SyntaxError` subclass. Direct-token structural errors also raise `ChevronError`, while malformed token values raise `TypeError`. An awaitable returned by a reader or lambda, or an async iterable used as a section value, is rejected by `render()` with a `TypeError` that directs callers to [`async_render()`](async-render.md).

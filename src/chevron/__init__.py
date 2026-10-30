@@ -8,6 +8,7 @@ except PackageNotFoundError:
     __version__ = "0+unknown"
 
 from .main import main, cli_main
+from .extensions import Extension
 from .renderer import (
     LambdaRegistry,
     Logger,
@@ -75,5 +76,6 @@ __all__ = [
     "compat",
     "func",
     "section",
+    "Extension",
     "__version__",
 ]

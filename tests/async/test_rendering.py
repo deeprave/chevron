@@ -2,7 +2,7 @@
 
 from io import StringIO
 import logging
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Iterator, Sequence
 import sys
 from typing import overload
 
@@ -10,11 +10,44 @@ import pytest
 
 import chevron
 from async_support import ANYIO_BACKENDS
-from chevron import ChevronError
+from chevron import ChevronError, Extension
+from async_cases import ASYNC_ITERATOR_DEFAULT_CASES, ASYNC_ITERATOR_EXTENSION_CASES
 from filesystem_partial_cases import FILESYSTEM_PARTIAL_CASES
 from rendering_case_sets import ASYNC_RENDER_CASES
 from rendering_cases import FilesystemPartialRenderCase, LambdaRenderCase, RenderCase
+from section_cases import ITERATOR_DEFAULT_CASES, ITERATOR_EXTENSION_CASES
 from token_cases import MALFORMED_RESERVED_TAG_TEMPLATES, TOKEN_VALIDATION_CASES
+
+
+class _CallerOwnedItems:
+    def __init__(self) -> None:
+        self.cursor = self.items()
+
+    def __aiter__(self) -> AsyncIterator[str]:
+        return self.cursor
+
+    async def items(self) -> AsyncIterator[str]:
+        yield "first"
+        yield "second"
+
+
+@pytest.fixture
+def inverted_iterators_enabled() -> Iterator[None]:
+    Extension.disable(Extension.ALL)
+    Extension.enable(Extension.INVERTED_ITERATORS)
+    try:
+        yield
+    finally:
+        Extension.disable(Extension.ALL)
+
+
+@pytest.fixture
+def extensions_disabled() -> Iterator[None]:
+    Extension.disable(Extension.ALL)
+    try:
+        yield
+    finally:
+        Extension.disable(Extension.ALL)
 
 
 @pytest.mark.anyio
@@ -36,6 +69,129 @@ async def test_async_rendering_case(anyio_backend: str, case: RenderCase) -> Non
         )
         == case.expected
     )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+@pytest.mark.parametrize(
+    "case",
+    ITERATOR_EXTENSION_CASES + ASYNC_ITERATOR_EXTENSION_CASES,
+    ids=lambda case: case.name,
+)
+async def test_async_iterator_extension_case(
+    anyio_backend: str, inverted_iterators_enabled: None, case: RenderCase
+) -> None:
+    assert (
+        await chevron.async_render(
+            case.template,
+            case.render_data(),
+            partials_dict=case.partials,
+            scopes=case.scopes,
+            def_ldel=case.initial_delimiters[0],
+            def_rdel=case.initial_delimiters[1],
+        )
+        == case.expected
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_inverted_iterators_are_disabled_by_default(
+    anyio_backend: str, extensions_disabled: None
+) -> None:
+    async def items():
+        if False:
+            yield None
+
+    assert (
+        await chevron.async_render("{{^items}}fallback{{/items}}", {"items": items()})
+        == ""
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+@pytest.mark.parametrize(
+    "case",
+    ITERATOR_DEFAULT_CASES + ASYNC_ITERATOR_DEFAULT_CASES,
+    ids=lambda case: case.name,
+)
+async def test_async_iterator_default_cases(
+    anyio_backend: str, extensions_disabled: None, case: RenderCase
+) -> None:
+    assert (
+        await chevron.async_render(
+            case.template,
+            case.render_data(),
+            partials_dict=case.partials,
+            scopes=case.scopes,
+            def_ldel=case.initial_delimiters[0],
+            def_rdel=case.initial_delimiters[1],
+        )
+        == case.expected
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_inverted_async_iterable_leaves_caller_iterator_open(
+    anyio_backend: str, inverted_iterators_enabled: None
+) -> None:
+    items = _CallerOwnedItems()
+
+    assert (
+        await chevron.async_render("{{^items}}fallback{{/items}}", {"items": items})
+        == ""
+    )
+    assert await anext(items.cursor) == "second"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_iterator_probe_does_not_mask_render_errors(
+    anyio_backend: str, inverted_iterators_enabled: None
+) -> None:
+    class RenderError(Exception):
+        pass
+
+    @chevron.func
+    def fail() -> str:
+        raise RenderError("render failure")
+
+    items = _CallerOwnedItems()
+    with pytest.raises(RenderError, match="render failure"):
+        await chevron.async_render(
+            "{{#outer}}{{^items}}fallback{{/items}}{{fail}}{{/outer}}",
+            {"outer": True, "items": items},
+            lambdas={"fail": fail},
+        )
+    assert await anext(items.cursor) == "second"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_iterator_probe_preserves_caller_source_through_cancellation(
+    anyio_backend: str, inverted_iterators_enabled: None
+) -> None:
+    import anyio
+
+    cancel_scope = anyio.CancelScope()
+
+    @chevron.func
+    async def cancel() -> str:
+        cancel_scope.cancel()
+        await anyio.lowlevel.checkpoint()
+        return ""
+
+    items = _CallerOwnedItems()
+    with cancel_scope:
+        await chevron.async_render(
+            "{{#outer}}{{^items}}fallback{{/items}}{{cancel}}{{/outer}}",
+            {"outer": True, "items": items},
+            lambdas={"cancel": cancel},
+        )
+
+    assert await anext(items.cursor) == "second"
 
 
 @pytest.mark.anyio
@@ -1033,19 +1189,6 @@ async def test_concurrent_nested_compatibility_renders_keep_scopes_isolated(
             "{{#values}}{{name}}{{/values}}", lambdas={"values": values}
         )
         == "first|second"
-    )
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
-async def test_inverted_async_iterable_is_not_consumed(anyio_backend: str) -> None:
-    async def values():
-        raise AssertionError("inverted sections must not consume async iterables")
-        yield None
-
-    assert (
-        await chevron.async_render("{{^values}}empty{{/values}}", {"values": values()})
-        == ""
     )
 
 

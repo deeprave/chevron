@@ -43,7 +43,7 @@ This data produces one bullet for each change:
 }
 ```
 
-Each `changes` item becomes the nearest context while its iteration is rendered, so `{{kind}}` and `{{summary}}` resolve from that item's mapping. The nested `labels` section repeats for each string label; strings do not have named fields, so `{{.}}` means the current label itself. Lookup still falls back to outer contexts, so `{{version}}` remains available from `release` inside every `changes` item. An empty iterable, `false`, or a missing value skips the ordinary section and selects the inverted section, `{{^changes}}...{{/changes}}`.
+Each `changes` item becomes the nearest context while its iteration is rendered, so `{{kind}}` and `{{summary}}` resolve from that item's mapping. The nested `labels` section repeats for each string label; strings do not have named fields, so `{{.}}` means the current label itself. Lookup still falls back to outer contexts, so `{{version}}` remains available from `release` inside every `changes` item. An empty collection, `false`, or a missing value skips the ordinary section and selects the inverted section, `{{^changes}}...{{/changes}}`.
 
 The rendered output is:
 
@@ -58,3 +58,13 @@ The rendered output is:
 For a list of strings, `{{.}}` refers to each current item. For a boolean, a truthy value renders the body once without adding a new useful mapping context.
 
 Sections are also the historical shape of Mustache lambdas. Chevron supports them deliberately, but they are application callbacks rather than template-defined functions; see [lambdas](lambdas.md).
+
+## Iterators and generators
+
+Python iterators and asynchronous iterables are streaming section sources. By default, Chevron follows ordinary Python truthiness for them: an iterator object is truthy even when it has no remaining items. Enable [`Extension.INVERTED_ITERATORS`](../reference/extensions.md#optional-rendering-extensions) during application startup when an empty generator should select `{{^items}}...{{/items}}`.
+
+With that extension enabled, Chevron uses one cursor for an iterator name in its supplying context during a render. An inverted section may advance one item to determine whether that cursor is empty; it retains that item for a later ordinary section and does not materialise the rest of the source. A recognised iterator or asynchronous iterable can then be traversed only once in a render: once Chevron exhausts a non-empty cursor, later ordinary sections render no items rather than restarting it. Its non-empty result remains stable for inverted sections, so it does not become a fallback merely because an earlier ordinary section consumed it. Lists and tuples retain their normal repeatable section behaviour. `async_render()` applies the same rule to asynchronous iterables.
+
+This rule applies only after Chevron has classified the resolved value. A callable keeps its lambda behaviour and is never invoked merely to decide an inverted section.
+
+When `INVERTED_ITERATORS` is enabled and a template needs to traverse a streaming collection or generator more than once, provide an independently constructed iterator under a separate name for each traversal. Chevron preserves a cursor only for repeated use of the same name in the same context; it does not coordinate aliases that happen to reference one iterator object.

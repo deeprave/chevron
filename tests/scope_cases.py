@@ -5,25 +5,6 @@ from collections import namedtuple
 from rendering_cases import RenderCase
 
 
-class _LowercaseBool:
-    _CHEVRON_return_scope_when_falsy = True
-
-    def __init__(self, value: bool) -> None:
-        self.value = value
-
-    def __bool__(self) -> bool:
-        return self.value
-
-    def __str__(self) -> str:
-        return str(self.value).lower()
-
-
-class _CustomData(dict[str, object]):
-    def __getitem__(self, key: str) -> object:
-        item = super().__getitem__(key)
-        return _LowercaseBool(item) if isinstance(item, bool) else item
-
-
 class _EqualityError:
     def __eq__(self, other: object) -> bool:
         raise ValueError("equality failed")
@@ -35,16 +16,6 @@ class _TruthinessError:
 
     def __bool__(self) -> bool:
         raise ValueError("truthiness failed")
-
-
-class _PreservedFalsey:
-    _CHEVRON_return_scope_when_falsy = True
-
-    def __bool__(self) -> bool:
-        return False
-
-    def __str__(self) -> str:
-        return "preserved"
 
 
 class _Complex:
@@ -192,12 +163,6 @@ SCOPE_CASES = (
         data="an ordinary string",
         expected="",
     ),
-    RenderCase(
-        name="custom falsey values opt into rendering",
-        template="{{truthy}} {{falsy}}",
-        data=_CustomData({"truthy": True, "falsy": False}),
-        expected="true false",
-    ),
     *(
         RenderCase(
             name=f"ordinary falsey value {label} keeps tag behavior",
@@ -215,7 +180,6 @@ SCOPE_CASES = (
             ("empty string", "", "||inverted"),
             ("empty list", [], "||inverted"),
             ("empty mapping", {}, "||inverted"),
-            ("preserved", _PreservedFalsey(), "preserved|preserved|inverted"),
         )
     ),
     RenderCase(

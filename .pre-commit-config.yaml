@@ -59,4 +59,4 @@ repos:
     rev: v2.15
     hooks:
       - id: vulture
-        args: [src/]
+        args: [src/, vulture_whitelist.py]

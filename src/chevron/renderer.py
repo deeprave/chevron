@@ -4,6 +4,7 @@ from collections.abc import (
     Iterator,
     Mapping,
     Sequence,
+    Sized,
 )
 from dataclasses import dataclass, field
 from functools import update_wrapper
@@ -13,6 +14,7 @@ from pathlib import Path
 from types import MappingProxyType, TracebackType
 from typing import Any, Generic, Protocol, TypeAlias, TypeVar, cast
 
+from .extensions import Extension
 from .tokenizer import ChevronError, tokenize as _tokenize
 
 _MISSING = object()
@@ -160,9 +162,6 @@ def _normalise_value(key: str, value: TemplateData) -> TemplateData:
     if value in (0, False):
         return value
 
-    if getattr(value, "_CHEVRON_return_scope_when_falsy", False):
-        return value
-
     return value or ""
 
 
@@ -223,11 +222,11 @@ def _html_escape(string: str) -> str:
     return string
 
 
-def _current_scope(frame: "_RenderFrame | None") -> TemplateData:
-    """Return the nearest application scope for current-context lookup."""
+def _current_scope_frame(frame: "_RenderFrame | None") -> "_RenderFrame | None":
+    """Return the nearest frame carrying an application scope."""
     while frame is not None and frame.scope is _INVERTED_SECTION_MARKER:
         frame = frame.parent
-    return _MISSING if frame is None else frame.scope
+    return frame
 
 
 def _get_key(
@@ -237,18 +236,20 @@ def _get_key(
     allow_callable_traversal: bool = True,
     value_handler: Callable[[TemplateData], TemplateData] | None = None,
     log_resolution: bool = True,
-) -> TemplateData:
-    """Get a key from the current scope."""
+) -> tuple[TemplateData, "_RenderFrame | None"]:
+    """Get a key and the frame that supplied its direct binding."""
 
     blocked_callable_traversal = False
 
     # If the key is a dot
     if key == ".":
         # Then just return the current scope
-        scope = _current_scope(frame)
+        current_frame = _current_scope_frame(frame)
+        scope = _MISSING if current_frame is None else current_frame.scope
         if log_resolution:
             logger.debug("Resolved current template scope")
-        return value_handler(scope) if value_handler is not None else scope
+        value = value_handler(scope) if value_handler is not None else scope
+        return value, current_frame
 
     # Loop through the scopes
     current_frame = frame
@@ -294,7 +295,7 @@ def _get_key(
 
         if log_resolution:
             logger.debug("Resolved template name '%s' from template data", key)
-        return value
+        return value, current_frame
 
     # We couldn't find the key in any of the scopes
 
@@ -309,7 +310,8 @@ def _get_key(
         else:
             logger.warning("Could not find key '%s'", key)
 
-    return value_handler(_MISSING) if value_handler is not None else _MISSING
+    value = value_handler(_MISSING) if value_handler is not None else _MISSING
+    return value, None
 
 
 def _get_partial(
@@ -444,6 +446,12 @@ class _RenderFrame:
     delimiters: tuple[str, str]
     padding: str = ""
     overrides: Mapping[str, "_SectionBody"] = field(default_factory=dict)
+    iterator_states: dict[str, "_IteratorState"] = field(
+        default_factory=dict, compare=False, repr=False
+    )
+    async_iterator_states: dict[str, object] = field(
+        default_factory=dict, compare=False, repr=False
+    )
 
     @classmethod
     def from_scopes(
@@ -490,6 +498,8 @@ class _RenderFrame:
             delimiters,
             self.padding if padding is None else padding,
             self.overrides,
+            self.iterator_states,
+            self.async_iterator_states,
         )
 
     def with_overrides(self, overrides: Mapping[str, "_SectionBody"]) -> "_RenderFrame":
@@ -502,6 +512,8 @@ class _RenderFrame:
             self.delimiters,
             self.padding,
             MappingProxyType(combined),
+            self.iterator_states,
+            self.async_iterator_states,
         )
 
     def without_override(self, key: str) -> "_RenderFrame":
@@ -516,14 +528,66 @@ class _RenderFrame:
             self.delimiters,
             self.padding,
             MappingProxyType(overrides),
+            self.iterator_states,
+            self.async_iterator_states,
         )
 
 
 @dataclass
+class _IteratorState:
+    """One synchronous render cursor with tri-state emptiness."""
+
+    iterator: Iterator[TemplateData]
+    empty: bool | None = None
+    first_item: TemplateData | object = _MISSING
+
+    def is_empty(self) -> bool | None:
+        """Return unknown, non-empty, or empty without advancing the cursor."""
+        return self.empty
+
+    def probe(self) -> bool:
+        """Determine emptiness without losing a first yielded item."""
+        if self.empty is None:
+            try:
+                self.first_item = next(self.iterator)
+            except StopIteration:
+                self.empty = True
+            else:
+                self.empty = False
+        return self.empty
+
+    def __next__(self) -> TemplateData:
+        """Yield the buffered item, then continue through the source iterator."""
+        if self.first_item is not _MISSING:
+            item = self.first_item
+            self.first_item = _MISSING
+            return item
+        try:
+            item = next(self.iterator)
+        except StopIteration:
+            if self.empty is None:
+                self.empty = True
+            raise
+        self.empty = False
+        return item
+
+
+@dataclass
 class _RenderState:
-    """Compatibility token reuse shared by one renderer instance."""
+    """Private state shared by one renderer instance."""
 
     token_cache: dict[str, list[Token]] = field(default_factory=dict)
+
+
+def _iterator_state(
+    frame: _RenderFrame, key: str, value: Iterator[TemplateData]
+) -> _IteratorState:
+    """Return the canonical cursor stored on one supplying render frame."""
+    if state := frame.iterator_states.get(key):
+        return state
+    state = _IteratorState(iter(value))
+    frame.iterator_states[key] = state
+    return state
 
 
 @dataclass
@@ -687,8 +751,8 @@ class _SourcePolicy(Protocol):
         frame: _RenderFrame,
         value_handler: Callable[[TemplateData], TemplateData],
         log_resolution: bool = True,
-    ) -> tuple[TemplateData, bool]:
-        """Return the value and whether it came from the explicit mapping."""
+    ) -> tuple[TemplateData, bool, _RenderFrame | None]:
+        """Return the value, its explicit status, and supplying frame."""
         ...
 
 
@@ -702,14 +766,15 @@ class _PermissiveSource:
         frame: _RenderFrame,
         value_handler: Callable[[TemplateData], TemplateData],
         log_resolution: bool = True,
-    ) -> tuple[TemplateData, bool]:
-        return _get_key(
+    ) -> tuple[TemplateData, bool, _RenderFrame | None]:
+        value, binding = _get_key(
             key,
             frame,
             logger=self.logger,
             value_handler=value_handler,
             log_resolution=log_resolution,
-        ), False
+        )
+        return value, False, binding
 
 
 class _ExplicitSource:
@@ -730,13 +795,13 @@ class _ExplicitSource:
         frame: _RenderFrame,
         value_handler: Callable[[TemplateData], TemplateData],
         log_resolution: bool = True,
-    ) -> tuple[TemplateData, bool]:
+    ) -> tuple[TemplateData, bool, _RenderFrame | None]:
         if key in self.lambdas:
             if log_resolution:
                 self.logger.debug(
                     "Resolved template name '%s' from the lambda mapping", key
                 )
-            return self.lambdas[key], True
+            return self.lambdas[key], True, None
 
         def handle_value(value: TemplateData) -> TemplateData:
             if isinstance(value, Callable):
@@ -748,14 +813,15 @@ class _ExplicitSource:
                 return ""
             return value_handler(value)
 
-        return _get_key(
+        value, binding = _get_key(
             key,
             frame,
             logger=self.logger,
             allow_callable_traversal=False,
             value_handler=handle_value,
             log_resolution=log_resolution,
-        ), False
+        )
+        return value, False, binding
 
 
 def _partial_name(
@@ -777,7 +843,7 @@ def _partial_name(
     if not dynamic_key:
         logger.debug("Dynamic %s selector was empty", kind)
         return None
-    value, _ = policy.resolve(
+    value, _, _ = policy.resolve(
         dynamic_key,
         frame,
         lambda resolved: _normalise_value(dynamic_key, resolved),
@@ -1192,7 +1258,9 @@ class ChevronRender:
                 work.close_tokens()
         raise RuntimeError("render work completed without a root result")
 
-    def resolve(self, key: str, frame: _RenderFrame) -> tuple[TemplateData, bool]:
+    def resolve(
+        self, key: str, frame: _RenderFrame
+    ) -> tuple[TemplateData, bool, _RenderFrame | None]:
         return self.policy.resolve(
             key,
             frame,
@@ -1265,7 +1333,13 @@ class ChevronRender:
         work: _RenderWork[None],
         active: list[_RenderWork[None]],
     ) -> None:
-        value, _ = self.resolve(key, work.frame)
+        use_inverted_iterators = Extension.is_enabled(Extension.INVERTED_ITERATORS)
+        value, _, binding_frame = self.resolve(key, work.frame)
+        if isinstance(value, AsyncIterable):
+            raise TypeError(
+                f"Section '{key}' resolved to an async iterable; "
+                "use chevron.async_render instead"
+            )
         if isinstance(value, Callable):
             body = _collect_body(work.tokens, key, work.delimiters)
             work.delimiters = body.ending
@@ -1285,39 +1359,51 @@ class ChevronRender:
             elif protocol == _COMPAT_PROTOCOL:
                 work.append(self.compatibility_section(value, key, body, work.frame))
             return
-        if isinstance(value, AsyncIterable):
-            raise TypeError(
-                f"Section '{key}' resolved to an async iterable; "
-                "use chevron.async_render instead"
-            )
-        if isinstance(value, (Sequence, Iterator)) and not isinstance(value, str):
-            body = _collect_body(work.tokens, key, work.delimiters)
-            work.delimiters = body.ending
-            values = iter(value)
-
-            def render_next(
-                result: str | None = None, terminal_padding: str = ""
-            ) -> None:
-                if result is not None:
-                    work.append(result, terminal_padding=terminal_padding)
-                try:
-                    item = next(values)
-                except StopIteration:
-                    return
-                child = work.frame.child(item, body.opening, work.frame.padding)
-                _push_work(
-                    active,
-                    _RenderWork.from_tokens(
-                        iter(body.tokens),
-                        child,
-                        render_next,
-                        source_line_has_content=work.source_line_has_content,
-                    ),
-                )
-
-            render_next()
+        if not value:
+            work.frame = work.frame.child(_SKIPPED_SECTION_MARKER)
             return
-        work.frame = work.frame.child(value if value else _SKIPPED_SECTION_MARKER)
+        if isinstance(value, (Sequence, Iterator)) and not isinstance(value, str):
+            assert binding_frame is not None
+            values = (
+                (
+                    _iterator_state(
+                        binding_frame,
+                        key,
+                        value,
+                    )
+                    if use_inverted_iterators
+                    else iter(value)
+                )
+                if isinstance(value, Iterator)
+                else iter(value)
+            )
+        else:
+            work.frame = work.frame.child(value if value else _SKIPPED_SECTION_MARKER)
+            return
+
+        body = _collect_body(work.tokens, key, work.delimiters)
+        work.delimiters = body.ending
+
+        def render_next(result: str | None = None, terminal_padding: str = "") -> None:
+            if result is not None:
+                work.append(result, terminal_padding=terminal_padding)
+            try:
+                item = next(values)
+            except StopIteration:
+                return
+            child = work.frame.child(item, body.opening, work.frame.padding)
+            _push_work(
+                active,
+                _RenderWork.from_tokens(
+                    iter(body.tokens),
+                    child,
+                    render_next,
+                    source_line_has_content=work.source_line_has_content,
+                ),
+            )
+
+        render_next()
+        return
 
     def _render_partial(
         self, key: str, work: _RenderWork[None], active: list[_RenderWork[None]]
@@ -1470,7 +1556,10 @@ class ChevronRender:
             case "section":
                 self._render_section(key, work, active)
             case "inverted section":
-                value, _ = self.policy.resolve(
+                use_inverted_iterators = Extension.is_enabled(
+                    Extension.INVERTED_ITERATORS
+                )
+                value, _, binding_frame = self.policy.resolve(
                     key, work.frame, lambda value: _normalise_value(key, value)
                 )
                 if isinstance(value, AsyncIterable):
@@ -1478,8 +1567,23 @@ class ChevronRender:
                         f"Section '{key}' resolved to an async iterable; "
                         "use chevron.async_render instead"
                     )
+                if not value:
+                    is_empty = True
+                elif isinstance(value, Callable):
+                    is_empty = False
+                elif isinstance(value, Sized):
+                    is_empty = False
+                elif use_inverted_iterators and isinstance(value, Iterator):
+                    assert binding_frame is not None
+                    is_empty = _iterator_state(
+                        binding_frame,
+                        key,
+                        value,
+                    ).probe()
+                else:
+                    is_empty = False
                 work.frame = work.frame.child(
-                    _INVERTED_SECTION_MARKER if not value else _SKIPPED_SECTION_MARKER
+                    _INVERTED_SECTION_MARKER if is_empty else _SKIPPED_SECTION_MARKER
                 )
             case "partial":
                 self._render_partial(key, work, active)
@@ -1502,7 +1606,7 @@ class ChevronRender:
         work: _RenderWork[None],
         active: list[_RenderWork[None]],
     ) -> None:
-        value, explicit = self.resolve(key, work.frame)
+        value, explicit, _ = self.resolve(key, work.frame)
 
         def append_value(result: TemplateData, _terminal_padding: str = "") -> None:
             work.append(_interpolation_text(result, tag))

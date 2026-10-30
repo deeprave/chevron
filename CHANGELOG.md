@@ -4,6 +4,14 @@ All notable changes to Chevron are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `Extension.INVERTED_ITERATORS` opt-in support makes empty synchronous and asynchronous iterators select their paired inverted section. When enabled at application startup, Chevron uses one streaming cursor per recognised iterator or asynchronous-iterable binding in a render, preserving a peeked first item for ordinary rendering. Such streaming values can be traversed only once per render; an exhausted non-empty cursor retains its non-empty result for inverted sections. Iterator lifecycle remains application-owned.
+
+### Fixed
+
+- Removed the undocumented `_CHEVRON_return_scope_when_falsy` template-data escape hatch. Custom falsey values now follow ordinary falsey rendering behaviour.
+
 ## [0.17.1] - 2026-10-28
 
 ### Added
