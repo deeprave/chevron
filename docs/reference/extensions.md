@@ -14,14 +14,13 @@ Extension.enable(Extension.INVERTED_ITERATORS)
 
 `INVERTED_ITERATORS` makes an empty Python iterator or async iterable select its paired inverted section, just as an empty list does. It also gives that streaming source one cursor for the render, retaining a first item examined by an inverted section. See [sections](../language/sections.md#iterators-and-generators) for the resulting template behaviour.
 
-Enable or disable several extensions with one bitmask. `Extension.ALL` represents every extension implemented by the installed Chevron version:
+Enable every extension implemented by the installed Chevron version with `Extension.ALL`:
 
 ```python
 Extension.enable(Extension.ALL)
-Extension.disable(Extension.INVERTED_ITERATORS)
 ```
 
-`Extension.NONE` is the default. Renderer code can inspect a particular setting with `Extension.is_enabled(...)`; applications normally only need `enable()` during startup. Chevron currently does not prevent later calls to `enable()` or `disable()`; applications must not rely on changing extensions after rendering has begun.
+`Extension.NONE` is the default. The first call to `enable()` selects the complete process-wide extension mask and freezes it; a later call raises `RuntimeError`. Configure extensions during application startup, before rendering any templates. Renderer code can inspect a particular setting with `Extension.is_enabled(...)`; applications normally only need `enable()` during startup.
 
 ## Explicit lambda protocols
 

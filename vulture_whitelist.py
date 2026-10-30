@@ -4,4 +4,3 @@ from chevron.extensions import Extension
 
 Extension.ALL
 Extension.enable
-Extension.disable

@@ -24,18 +24,17 @@ See [proposal.md](proposal.md) for the motivation. Both renderers recognise `col
 
 ### Configure extensions globally with a bitmask
 
-`chevron.Extension` is a public `IntFlag` and the sole configuration surface for Chevron extensions. It provides `NONE`, `INVERTED_ITERATORS`, and `ALL`, along with class-level `enable()` and `disable()` methods. Flags are process-wide and additive or subtractive, allowing applications to configure a group with one call:
+`chevron.Extension` is a public `IntFlag` and the sole configuration surface for Chevron extensions. It provides `NONE`, `INVERTED_ITERATORS`, and `ALL`, along with class-level `enable()` and `is_enabled()` methods. The first `enable()` call selects the process-wide bitmask and freezes it:
 
 ```python
 from chevron import Extension
 
 Extension.enable(Extension.INVERTED_ITERATORS)
-Extension.disable(Extension.ALL)
 ```
 
-The default is `Extension.NONE`, preserving historic iterator behaviour unless the application opts in. `ALL` contains every extension currently implemented; it is not a promise that future, unimplemented flags already exist. Renderer code queries `Extension.is_enabled()` directly when it needs to apply an extension.
+The default is `Extension.NONE`, preserving historic iterator behaviour unless the application opts in. `ALL` contains every extension currently implemented; it is not a promise that future, unimplemented flags already exist. Renderer code queries `Extension.is_enabled()` directly when it needs to apply an extension. A later `enable()` call raises `RuntimeError`.
 
-This configuration is intentionally not synchronised or runtime-enforced. It is application-startup configuration and applications are expected to establish it before rendering begins, rather than change it concurrently with active renders. There is no `reset()` operation: `disable(Extension.ALL)` is the explicit way to disable every extension.
+This configuration is intentionally not synchronised. It is application-startup configuration and applications establish it before rendering begins. There is no public reset or disable operation.
 
 ### Keep one canonical cursor and tri-state emptiness per context value when enabled
 
@@ -61,4 +60,4 @@ Add a `RenderCase` with a fresh empty synchronous iterator and adjacent ordinary
 
 ## Migration Plan
 
-Applications that require empty iterators to select inverted sections enable `Extension.INVERTED_ITERATORS` during startup. Leaving extensions disabled retains historic behaviour. Rolling back consists of disabling that flag.
+Applications that require empty iterators to select inverted sections enable `Extension.INVERTED_ITERATORS` during startup. Leaving extensions disabled retains historic behaviour. Rolling back consists of removing the startup configuration before the application begins rendering.

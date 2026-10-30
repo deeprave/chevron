@@ -4,7 +4,7 @@
 
 ### Requirement: Applications configure Chevron extensions globally
 
-Chevron SHALL expose an `Extension` bitmask for optional, non-standard rendering behaviour. It SHALL provide `NONE`, an individually named value for every implemented extension, and `ALL` containing every implemented extension. Applications SHALL enable or disable one or more values through `Extension.enable()` and `Extension.disable()` without adding configuration to a render call or template context. Extensions SHALL be disabled by default.
+Chevron SHALL expose an `Extension` bitmask for optional, non-standard rendering behaviour. It SHALL provide `NONE`, an individually named value for every implemented extension, and `ALL` containing every implemented extension. Applications SHALL select one or more values through one call to `Extension.enable()` without adding configuration to a render call or template context. Extensions SHALL be disabled by default.
 
 #### Scenario: An application enables one extension
 
@@ -15,16 +15,6 @@ Chevron SHALL expose an `Extension` bitmask for optional, non-standard rendering
 
 - **WHEN** an application calls `Extension.enable(Extension.ALL)`
 - **THEN** subsequent renders apply every extension currently represented by `ALL`
-
-#### Scenario: An application disables a group of extensions
-
-- **WHEN** an application calls `Extension.disable()` with one or more extension values, including `Extension.ALL`
-- **THEN** subsequent renders do not apply those extensions
-
-#### Scenario: An application supplies an unknown extension bit
-
-- **WHEN** an application constructs `Extension` with a bit Chevron does not define
-- **THEN** construction raises `ValueError`
 
 #### Scenario: An application leaves extensions unconfigured
 
@@ -42,14 +32,14 @@ Chevron's renderer SHALL query an individual extension through `Extension.is_ena
 
 ### Requirement: Extension settings are fixed at application startup
 
-Extension configuration is process-wide application-startup configuration. An application that uses extensions SHALL configure them once before it begins using Chevron to render templates. Dynamic extension changes during later application runtime, including changes while rendering is in progress, are outside Chevron's supported contract. Chevron SHALL not provide synchronisation or runtime enforcement for such changes.
+Extension configuration is process-wide application-startup configuration. An application that uses extensions SHALL configure them once before it begins using Chevron to render templates. Chevron SHALL freeze the selected mask after that configuration. Chevron SHALL not provide synchronisation for configuration calls.
 
 #### Scenario: An application configures extensions before rendering
 
-- **WHEN** an application enables or disables extensions before it begins rendering
+- **WHEN** an application enables extensions before it begins rendering
 - **THEN** every renderer operation observes the configured extension values
 
-#### Scenario: An application attempts to change extensions after startup
+#### Scenario: An application attempts a second configuration
 
-- **WHEN** an application enables or disables an extension after it has begun using Chevron to render templates
-- **THEN** that dynamic configuration change is outside Chevron's supported contract, even though Chevron does not currently reject it
+- **WHEN** an application calls `Extension.enable()` after the extension mask has been configured
+- **THEN** Chevron raises `RuntimeError`

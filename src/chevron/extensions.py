@@ -12,15 +12,12 @@ class Extension(IntFlag, boundary=FlagBoundary.STRICT):
 
     @classmethod
     def enable(cls, extensions: "Extension") -> None:
-        """Enable one or more extensions for the application."""
-        global _enabled_extensions
-        _enabled_extensions |= cls(extensions)
-
-    @classmethod
-    def disable(cls, extensions: "Extension") -> None:
-        """Disable one or more extensions for the application."""
-        global _enabled_extensions
-        _enabled_extensions &= ~cls(extensions)
+        """Configure one or more extensions before rendering begins."""
+        global _enabled_extensions, _extensions_frozen
+        if _extensions_frozen:
+            raise RuntimeError("Chevron extensions have already been configured")
+        _enabled_extensions = cls(extensions)
+        _extensions_frozen = True
 
     @classmethod
     def is_enabled(cls, extensions: "Extension") -> bool:
@@ -30,3 +27,4 @@ class Extension(IntFlag, boundary=FlagBoundary.STRICT):
 
 
 _enabled_extensions = Extension.NONE
+_extensions_frozen = False
