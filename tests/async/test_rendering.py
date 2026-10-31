@@ -11,11 +11,19 @@ import pytest
 import chevron
 from async_support import ANYIO_BACKENDS
 from chevron import ChevronError, Extension
-from async_cases import ASYNC_ITERATOR_DEFAULT_CASES, ASYNC_ITERATOR_EXTENSION_CASES
+from async_cases import (
+    ASYNC_ITERATION_METADATA_CASES,
+    ASYNC_ITERATOR_DEFAULT_CASES,
+    ASYNC_ITERATOR_EXTENSION_CASES,
+)
 from filesystem_partial_cases import FILESYSTEM_PARTIAL_CASES
 from rendering_case_sets import ASYNC_RENDER_CASES
 from rendering_cases import FilesystemPartialRenderCase, LambdaRenderCase, RenderCase
-from section_cases import ITERATOR_DEFAULT_CASES, ITERATOR_EXTENSION_CASES
+from section_cases import (
+    ITERATION_METADATA_CASES,
+    ITERATOR_DEFAULT_CASES,
+    ITERATOR_EXTENSION_CASES,
+)
 from token_cases import MALFORMED_RESERVED_TAG_TEMPLATES, TOKEN_VALIDATION_CASES
 
 
@@ -56,13 +64,16 @@ async def test_async_rendering_case(anyio_backend: str, case: RenderCase) -> Non
 @pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
 @pytest.mark.parametrize(
     "case",
-    ITERATOR_EXTENSION_CASES + ASYNC_ITERATOR_EXTENSION_CASES,
+    ITERATOR_EXTENSION_CASES
+    + ITERATION_METADATA_CASES
+    + ASYNC_ITERATOR_EXTENSION_CASES
+    + ASYNC_ITERATION_METADATA_CASES,
     ids=lambda case: case.name,
 )
 async def test_async_iterator_extension_case(
     anyio_backend: str, enable_extensions: Callable[..., None], case: RenderCase
 ) -> None:
-    enable_extensions(Extension.INVERTED_ITERATORS)
+    enable_extensions(Extension.ENHANCED_ITERATORS)
     assert (
         await chevron.async_render(
             case.template,
@@ -119,7 +130,7 @@ async def test_async_iterator_default_cases(
 async def test_inverted_async_iterable_leaves_caller_iterator_open(
     anyio_backend: str, enable_extensions: Callable[..., None]
 ) -> None:
-    enable_extensions(Extension.INVERTED_ITERATORS)
+    enable_extensions(Extension.ENHANCED_ITERATORS)
     items = _CallerOwnedItems()
 
     assert (
@@ -134,7 +145,7 @@ async def test_inverted_async_iterable_leaves_caller_iterator_open(
 async def test_async_iterator_probe_does_not_mask_render_errors(
     anyio_backend: str, enable_extensions: Callable[..., None]
 ) -> None:
-    enable_extensions(Extension.INVERTED_ITERATORS)
+    enable_extensions(Extension.ENHANCED_ITERATORS)
 
     class RenderError(Exception):
         pass
@@ -158,7 +169,7 @@ async def test_async_iterator_probe_does_not_mask_render_errors(
 async def test_async_iterator_probe_preserves_caller_source_through_cancellation(
     anyio_backend: str, enable_extensions: Callable[..., None]
 ) -> None:
-    enable_extensions(Extension.INVERTED_ITERATORS)
+    enable_extensions(Extension.ENHANCED_ITERATORS)
     import anyio
 
     cancel_scope = anyio.CancelScope()

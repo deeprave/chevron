@@ -2,11 +2,12 @@
 
 All notable changes to Chevron are documented in this file.
 
-## [Unreleased]
+## [0.18.0] - TBD
 
 ### Added
 
-- `Extension.INVERTED_ITERATORS` opt-in support makes empty synchronous and asynchronous iterators select their paired inverted section. When enabled at application startup, Chevron uses one streaming cursor per recognised iterator or asynchronous-iterable binding in a render, preserving a peeked first item for ordinary rendering. Such streaming values can be traversed only once per render; an exhausted non-empty cursor retains its non-empty result for inverted sections. Iterator lifecycle remains application-owned.
+- `Extension.ENHANCED_ITERATORS` opt-in support allows empty synchronous and asynchronous iterators to select their paired inverted section.
+- This also exposes `.first`, `.last`, `.index`, `.ordinal`, and `.length` within repeated sections, plus `.0`, `.1`, and later values for sized indexable sources.
 
 ### Fixed
 

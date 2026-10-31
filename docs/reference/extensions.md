@@ -9,10 +9,10 @@ Chevron adds a small set of documented interfaces around Mustache rather than ch
 ```python
 from chevron import Extension
 
-Extension.enable(Extension.INVERTED_ITERATORS)
+Extension.enable(Extension.ENHANCED_ITERATORS)
 ```
 
-`INVERTED_ITERATORS` makes an empty Python iterator or async iterable select its paired inverted section, just as an empty list does. It also gives that streaming source one cursor for the render, retaining a first item examined by an inverted section. See [sections](../language/sections.md#iterators-and-generators) for the resulting template behaviour.
+`ENHANCED_ITERATORS` makes an empty Python iterator or async iterable select its paired inverted section, just as an empty list does. Within a repeated section it also exposes `.first`, `.last`, `.index`, `.ordinal`, and `.length`; sized, indexable sources additionally expose `.0`, `.1`, and later values. It gives a streaming source one cursor for the render, retaining only the bounded lookahead needed for inversion and last-item metadata. See [sections](../language/sections.md#iterators-and-generators) for the template contract.
 
 Enable every extension implemented by the installed Chevron version with `Extension.ALL`:
 

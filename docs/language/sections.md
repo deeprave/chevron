@@ -61,10 +61,18 @@ Sections are also the historical shape of Mustache lambdas. Chevron supports the
 
 ## Iterators and generators
 
-Python iterators and asynchronous iterables are streaming section sources. By default, Chevron follows ordinary Python truthiness for them: an iterator object is truthy even when it has no remaining items. Enable [`Extension.INVERTED_ITERATORS`](../reference/extensions.md#optional-rendering-extensions) during application startup when an empty generator should select `{{^items}}...{{/items}}`.
+Python iterators and asynchronous iterables are streaming section sources. By default, Chevron follows ordinary Python truthiness for them: an iterator object is truthy even when it has no remaining items. Enable [`Extension.ENHANCED_ITERATORS`](../reference/extensions.md#optional-rendering-extensions) during application startup when an empty generator should select `{{^items}}...{{/items}}`.
 
 With that extension enabled, Chevron uses one cursor for an iterator name in its supplying context during a render. An inverted section may advance one item to determine whether that cursor is empty; it retains that item for a later ordinary section and does not materialise the rest of the source. A recognised iterator or asynchronous iterable can then be traversed only once in a render: once Chevron exhausts a non-empty cursor, later ordinary sections render no items rather than restarting it. Its non-empty result remains stable for inverted sections, so it does not become a fallback merely because an earlier ordinary section consumed it. Lists and tuples retain their normal repeatable section behaviour. `async_render()` applies the same rule to asynchronous iterables.
 
+Enhanced repeated sections expose `.first`, `.last`, `.index`, and `.ordinal` for the current item. `.index` starts at zero; `.ordinal` starts at one. `.length` is available when Chevron can read a source's `__len__` without consuming it, otherwise it resolves to `None` and therefore renders as empty. For sized sources that also provide `__getitem__`, `.0`, `.1`, and later non-negative indexes read the corresponding source value; an unsupported or out-of-range index resolves to `None`. These names are reserved inside the repeated section and take precedence over item fields.
+
+```mustache
+{{#values}}{{#.first}}- {{/.first}}{{.}}{{^.last}}, {{/.last}}{{/values}}
+```
+
+For `values = ["one", "two", "three"]`, this renders `- one, two, three`. Chevron uses a captured length for sized sources and at most one buffered next item for streaming sources, so the same template also works for generators without materialising them.
+
 This rule applies only after Chevron has classified the resolved value. A callable keeps its lambda behaviour and is never invoked merely to decide an inverted section.
 
-When `INVERTED_ITERATORS` is enabled and a template needs to traverse a streaming collection or generator more than once, provide an independently constructed iterator under a separate name for each traversal. Chevron preserves a cursor only for repeated use of the same name in the same context; it does not coordinate aliases that happen to reference one iterator object.
+When `ENHANCED_ITERATORS` is enabled and a template needs to traverse a streaming collection or generator more than once, provide an independently constructed iterator under a separate name for each traversal. Chevron preserves a cursor only for repeated use of the same name in the same context; it does not coordinate aliases that happen to reference one iterator object.

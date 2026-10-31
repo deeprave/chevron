@@ -6,6 +6,7 @@ from collections.abc import (
     Awaitable,
     Callable,
     Iterator,
+    Mapping,
     Sequence,
     Sized,
 )
@@ -30,6 +31,7 @@ from .renderer import (
     _RenderWork,
     _SECTION_PROTOCOL,
     _INVERTED_SECTION_MARKER,
+    _IteratorState,
     _SKIPPED_SECTION_MARKER,
     _SourcePolicy,
     _SectionBody,
@@ -74,6 +76,7 @@ class _AsyncIteratorState:
     """One asynchronous render cursor with tri-state emptiness."""
 
     iterator: AsyncIterator[TemplateData]
+    sized: bool
     empty: bool | None = None
     first_item: TemplateData | object = _MISSING
 
@@ -106,6 +109,17 @@ class _AsyncIteratorState:
             raise
         self.empty = False
         return item
+
+    async def next_with_last(self) -> tuple[TemplateData, bool | None]:
+        """Yield one item and retain bounded lookahead for an unsized source."""
+        item = await anext(self)
+        if self.sized:
+            return item, None
+        try:
+            self.first_item = await anext(self.iterator)
+        except StopAsyncIteration:
+            return item, True
+        return item, False
 
 
 def _read_in_worker(reader: Callable[[], TemplateData]) -> tuple[TemplateData]:
@@ -176,7 +190,9 @@ class AsyncChevronRender:
         """Return the canonical cursor stored on one supplying render frame."""
         if state := frame.async_iterator_states.get(key):
             return cast(_AsyncIteratorState, state)
-        state = _AsyncIteratorState(aiter(value))
+        state = _AsyncIteratorState(
+            aiter(value), isinstance(value, Sized) and not isinstance(value, Mapping)
+        )
         frame.async_iterator_states[key] = state
         return state
 
@@ -364,7 +380,7 @@ class AsyncChevronRender:
         work: _RenderWork[Awaitable[None]],
         active: list[_RenderWork[Awaitable[None]]],
     ) -> None:
-        use_inverted_iterators = Extension.is_enabled(Extension.INVERTED_ITERATORS)
+        use_enhanced_iterators = Extension.is_enabled(Extension.ENHANCED_ITERATORS)
         async_values = None
         sync_values = None
         value, _, binding_frame = self.resolve(key, work.frame)
@@ -404,23 +420,40 @@ class AsyncChevronRender:
                     key,
                     value,
                 )
-                if use_inverted_iterators
+                if use_enhanced_iterators
                 else aiter(value)
             )
         if async_values is not None:
             body = await self.collect_section(work.tokens, key, work.delimiters)
             work.delimiters = body.ending
+            index = 0
 
             async def render_next(
                 result: str | None = None, terminal_padding: str = ""
             ) -> None:
+                nonlocal index
                 if result is not None:
                     work.append(result, terminal_padding=terminal_padding)
                 try:
-                    item = await anext(async_values)
+                    if not use_enhanced_iterators:
+                        item = await anext(async_values)
+                        last = None
+                    elif isinstance(async_values, _AsyncIteratorState):
+                        item, last = await async_values.next_with_last()
+                    else:
+                        item = await anext(async_values)
+                        last = None
                 except StopAsyncIteration:
                     return
-                child = work.frame.child(item, body.opening, work.frame.padding)
+                index += 1
+                child = work.frame.child(
+                    item,
+                    body.opening,
+                    work.frame.padding,
+                    value if use_enhanced_iterators else _MISSING,
+                    index - 1,
+                    last,
+                )
                 _push_work(
                     active,
                     _RenderWork.from_tokens(
@@ -442,7 +475,7 @@ class AsyncChevronRender:
                         key,
                         value,
                     )
-                    if use_inverted_iterators
+                    if use_enhanced_iterators
                     else iter(value)
                 )
                 if isinstance(value, Iterator)
@@ -454,17 +487,34 @@ class AsyncChevronRender:
 
         body = await self.collect_section(work.tokens, key, work.delimiters)
         work.delimiters = body.ending
+        index = 0
 
         async def render_next(
             result: str | None = None, terminal_padding: str = ""
         ) -> None:
+            nonlocal index
             if result is not None:
                 work.append(result, terminal_padding=terminal_padding)
             try:
-                item = next(sync_values)
+                if not use_enhanced_iterators:
+                    item = next(sync_values)
+                    last = None
+                elif isinstance(sync_values, _IteratorState):
+                    item, last = sync_values.next_with_last()
+                else:
+                    item = next(sync_values)
+                    last = None
             except StopIteration:
                 return
-            child = work.frame.child(item, body.opening, work.frame.padding)
+            index += 1
+            child = work.frame.child(
+                item,
+                body.opening,
+                work.frame.padding,
+                value if use_enhanced_iterators else _MISSING,
+                index - 1,
+                last,
+            )
             _push_work(
                 active,
                 _RenderWork.from_tokens(
@@ -649,8 +699,8 @@ class AsyncChevronRender:
             case "section":
                 await self._render_section(key, work, active)
             case "inverted section":
-                use_inverted_iterators = Extension.is_enabled(
-                    Extension.INVERTED_ITERATORS
+                use_enhanced_iterators = Extension.is_enabled(
+                    Extension.ENHANCED_ITERATORS
                 )
                 value, _, binding_frame = self.policy.resolve(
                     key, work.frame, lambda value: _normalise_value(key, value)
@@ -661,14 +711,14 @@ class AsyncChevronRender:
                     is_empty = False
                 elif isinstance(value, Sized):
                     is_empty = False
-                elif use_inverted_iterators and isinstance(value, AsyncIterable):
+                elif use_enhanced_iterators and isinstance(value, AsyncIterable):
                     assert binding_frame is not None
                     is_empty = await self._async_iterator_state(
                         binding_frame,
                         key,
                         value,
                     ).probe()
-                elif use_inverted_iterators and isinstance(value, Iterator):
+                elif use_enhanced_iterators and isinstance(value, Iterator):
                     assert binding_frame is not None
                     is_empty = _iterator_state(
                         binding_frame,
