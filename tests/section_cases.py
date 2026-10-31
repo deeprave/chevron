@@ -279,7 +279,10 @@ ITERATION_METADATA_CASES = (
         name="iteration metadata resolves numeric names from an indexable source",
         template="{{#values}}{{.index}}={{.0}}/{{.1}}/{{.3}};{{/values}}",
         expected="0=one/two/;1=one/two/;2=one/two/;",
-        data={"values": ["one", "two", "three"]},
+        data={
+            "": {"3": "leaked"},
+            "values": ["one", "two", "three"],
+        },
     ),
     RenderCase(
         name="iteration metadata resolves numeric names from an indexable iterator",
@@ -291,7 +294,7 @@ ITERATION_METADATA_CASES = (
         name="iteration metadata leaves numeric names unavailable for a generator",
         template="{{#values}}[{{.0}}{{^.0}}none{{/.0}}:{{.}}]{{/values}}",
         expected="[none:first][none:second][none:third]",
-        data_factory=lambda: {"values": _many_items()},
+        data_factory=lambda: {"": {"0": "leaked"}, "values": _many_items()},
     ),
     RenderCase(
         name="nested repeated sections use their nearest iteration metadata",

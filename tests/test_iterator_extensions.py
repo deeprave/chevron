@@ -102,4 +102,10 @@ def test_oversized_numeric_metadata_name_is_unavailable(
     selector = "." + "1" * 4_301
     template = "{{#items}}[{{" + selector + "}}]{{/items}}"
 
-    assert chevron.render(template, {"items": ["one"]}) == "[]"
+    assert (
+        chevron.render(
+            template,
+            {"": {selector[1:]: "leaked"}, "items": ["one"]},
+        )
+        == "[]"
+    )
