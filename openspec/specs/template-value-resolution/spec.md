@@ -53,6 +53,25 @@ The renderer SHALL retain established behaviour for `0`, `False`, empty strings,
 - **WHEN** an inverted section resolves to an empty value
 - **THEN** its body renders according to existing inverted-section semantics
 
+### Requirement: Extension-enabled synchronous iterator inversion
+
+When `Extension.INVERTED_ITERATORS` is enabled, a recognised synchronous iterator SHALL be a streaming section source within its active render frame. An empty source SHALL select an inverted section, a first item observed by that check SHALL remain available to a later ordinary section in that frame, and an exhausted source SHALL not be traversed again.
+
+#### Scenario: Extension-enabled empty iterator controls inversion
+
+- **WHEN** `Extension.INVERTED_ITERATORS` is enabled and an inverted section references an empty synchronous iterator
+- **THEN** its body renders
+
+#### Scenario: Extension-enabled iterator preserves its first item
+
+- **WHEN** an inverted section checks a non-empty synchronous iterator and an ordinary section later uses it in the same render frame
+- **THEN** the ordinary section renders the first item and remaining source items in order
+
+#### Scenario: Extension-enabled iterator does not restart
+
+- **WHEN** an ordinary section exhausts a synchronous iterator and a later ordinary or inverted section uses it in the same render frame
+- **THEN** the later ordinary section renders no body and the inverted section remains skipped
+
 ### Requirement: Dotted names retain their resolved scope
 
 Chevron SHALL resolve the first component of a dotted name from the active template scopes. Each remaining component SHALL resolve only from the value produced by its preceding component and SHALL not fall back to another active scope.

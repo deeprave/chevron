@@ -4,7 +4,7 @@
 
 ### Requirement: Async section iteration preserves order
 
-Async rendering SHALL support asynchronous iterables as section values, awaiting each item and rendering it in source order. It SHALL not implicitly parallelise lambdas, partials or section items. Plain awaitables in template data SHALL not be implicitly awaited as lambdas. A callable SHALL retain its existing lambda treatment before asynchronous-iterable handling, and Chevron SHALL not invoke it merely to decide inverted-section selection. When `Extension.INVERTED_ITERATORS` is enabled, an asynchronous iterable SHALL have one canonical cursor per resolved section binding in a render and SHALL be traversed at most once during that render; an empty cursor controls an inverted section as an empty value without losing a peeked first item when it is non-empty. When a non-empty cursor is exhausted, later ordinary sections render no items while inverted sections retain its non-empty result. When the extension is disabled, async rendering SHALL retain its existing asynchronous-iterable section behaviour.
+Async rendering SHALL support asynchronous iterables as section values, awaiting each item and rendering it in source order. It SHALL not implicitly parallelise lambdas, partials or section items. Plain awaitables in template data SHALL not be implicitly awaited as lambdas. A callable SHALL retain its existing lambda treatment before asynchronous-iterable handling, and Chevron SHALL not invoke it merely to decide inverted-section selection. When `Extension.INVERTED_ITERATORS` is enabled, an asynchronous iterable SHALL be a streaming section source within its active render frame. An empty source SHALL select an inverted section, and a first item observed by that check SHALL remain available to a later ordinary section in the same frame. A source SHALL not be traversed again after an ordinary section exhausts it. When the extension is disabled, async rendering SHALL retain its existing asynchronous-iterable section behaviour.
 
 #### Scenario: Async iterable section
 
@@ -26,20 +26,15 @@ Async rendering SHALL support asynchronous iterables as section values, awaiting
 - **WHEN** `Extension.INVERTED_ITERATORS` is enabled and an inverted section checks an asynchronous iterator that later supplies an item to an ordinary section
 - **THEN** the inverted section is skipped and the ordinary section renders that first item
 
-#### Scenario: Async iterator source persists across render contexts
-
-- **WHEN** `Extension.INVERTED_ITERATORS` is enabled and an inverted section checks an asynchronous iterator and a later section uses the same name from the same supplying context
-- **THEN** the later section renders the buffered first item and the remaining source items in order
-
 #### Scenario: Exhausted non-empty async iterator does not restart or select an inverted section
 
 - **WHEN** `Extension.INVERTED_ITERATORS` is enabled and an ordinary section exhausts an asynchronous iterable and a later ordinary or inverted section resolves it
 - **THEN** the ordinary section renders no body and the inverted section skips its body
 
-#### Scenario: Async iterator lifecycle remains caller-owned
+#### Scenario: Async iterator cancellation remains application-owned
 
-- **WHEN** an asynchronous iterator is supplied as template data
-- **THEN** Chevron does not close it on successful rendering, a rendering error, or cancellation
+- **WHEN** cancellation interrupts an awaited caller-owned asynchronous iterator
+- **THEN** Chevron does not close it itself, but the application SHALL not assume the iterator remains reusable
 
 #### Scenario: Async rendering preserves a synchronous iterator cursor
 

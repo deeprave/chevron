@@ -4,7 +4,7 @@
 
 ### Requirement: Existing falsey-value rendering remains compatible
 
-The renderer SHALL retain established behaviour for `0`, `False`, empty strings, empty collections, and custom falsey values across interpolation, unescaped interpolation, normal sections, and inverted sections. A callable SHALL retain its existing lambda treatment before iterator handling, and Chevron SHALL not invoke it merely to decide inverted-section selection. When `Extension.INVERTED_ITERATORS` is enabled, a recognised synchronous iterator SHALL have one canonical cursor per resolved section binding in a render with an initially unknown emptiness result. It SHALL be traversed at most once during that render. Once Chevron has examined that cursor, its result SHALL remain empty or non-empty for later sections that resolve the same lookup binding. When a non-empty cursor is exhausted, later ordinary sections SHALL render no items, while inverted sections SHALL retain its non-empty result. When the extension is disabled, Chevron SHALL retain its existing iterator section behaviour.
+The renderer SHALL retain established behaviour for `0`, `False`, empty strings, empty collections, and custom falsey values across interpolation, unescaped interpolation, normal sections, and inverted sections. A callable SHALL retain its existing lambda treatment before iterator handling, and Chevron SHALL not invoke it merely to decide inverted-section selection. When `Extension.INVERTED_ITERATORS` is enabled, a recognised synchronous iterator SHALL be a streaming section source within its active render frame. An empty source SHALL select an inverted section, and a first item observed by that check SHALL remain available to a later ordinary section in the same frame. A source SHALL not be traversed again after an ordinary section exhausts it. When the extension is disabled, Chevron SHALL retain its existing iterator section behaviour.
 
 #### Scenario: Numeric zero and false interpolate unchanged
 
@@ -35,11 +35,6 @@ The renderer SHALL retain established behaviour for `0`, `False`, empty strings,
 
 - **WHEN** `Extension.INVERTED_ITERATORS` is enabled and an inverted section checks a synchronous iterator that later supplies an item to an ordinary section
 - **THEN** the inverted section is skipped and the ordinary section renders that first item
-
-#### Scenario: Iterator cursor persists across render contexts
-
-- **WHEN** `Extension.INVERTED_ITERATORS` is enabled and an inverted section checks a synchronous iterator and a later section uses the same name from the same supplying context
-- **THEN** the later section renders the buffered first item and the remaining source items in order
 
 #### Scenario: Exhausted iterator does not restart
 

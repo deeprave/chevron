@@ -101,6 +101,25 @@ Async rendering SHALL support asynchronous iterables as section values, awaiting
 - **WHEN** an inverted section references an async iterable
 - **THEN** it uses the object's ordinary truthiness without consuming it to discover whether it yields items
 
+### Requirement: Extension-enabled async iterator inversion
+
+When `Extension.INVERTED_ITERATORS` is enabled, an asynchronous iterable SHALL be a streaming section source within its active render frame. An empty source SHALL select an inverted section, a first item observed by that check SHALL remain available to a later ordinary section in that frame, and an exhausted source SHALL not be traversed again.
+
+#### Scenario: Extension-enabled empty async iterator controls inversion
+
+- **WHEN** `Extension.INVERTED_ITERATORS` is enabled and an inverted section references an empty asynchronous iterator
+- **THEN** Chevron awaits at most one item and renders the inverted body
+
+#### Scenario: Extension-enabled async iterator preserves its first item
+
+- **WHEN** an inverted section checks a non-empty asynchronous iterator and an ordinary section later uses it in the same render frame
+- **THEN** the ordinary section renders the first item and remaining source items in order
+
+#### Scenario: Extension-enabled async iterator does not restart
+
+- **WHEN** an ordinary section exhausts an asynchronous iterator and a later ordinary or inverted section uses it in the same render frame
+- **THEN** the later ordinary section renders no body and the inverted section remains skipped
+
 ### Requirement: Cancellation and concurrent renders preserve state isolation
 
 Cancellation SHALL propagate through async rendering and restore scopes and diagnostic state. Independent renders SHALL not share mutable invocation state. CPU-only rendering SHALL include cooperative checkpoints without promising pre-emption within arbitrary caller code or a single pure parsing operation.
@@ -115,6 +134,11 @@ Cancellation SHALL propagate through async rendering and restore scopes and diag
 
 - **WHEN** a render is cancelled while awaiting a lambda
 - **THEN** cancellation propagates and its temporary render state is unwound
+
+#### Scenario: Cancel a caller-owned async iterator
+
+- **WHEN** cancellation interrupts an awaited caller-owned asynchronous iterator
+- **THEN** Chevron does not close it itself, but the application does not assume the iterator remains reusable
 
 #### Scenario: Independent concurrent renders
 
