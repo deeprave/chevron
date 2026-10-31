@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import AsyncIterable, AsyncIterator, Sequence
 import sys
 from typing import overload
 
@@ -97,3 +97,21 @@ def test_sync_render_rejects_async_iterable_inverted_sections() -> None:
 
     with pytest.raises(TypeError, match="use chevron.async_render"):
         chevron.render("{{^values}}empty{{/values}}", {"values": values()})
+
+
+@pytest.mark.parametrize(
+    "template", ["{{#values}}body{{/values}}", "{{^values}}empty{{/values}}"]
+)
+def test_sync_render_rejects_callable_async_iterable_sections(template: str) -> None:
+    class Values(AsyncIterable[str]):
+        def __call__(self, _body: str, _render: object) -> str:
+            return "called"
+
+        def __aiter__(self) -> AsyncIterator[str]:
+            return self.items()
+
+        async def items(self) -> AsyncIterator[str]:
+            yield "value"
+
+    with pytest.raises(TypeError, match="use chevron.async_render"):
+        chevron.render(template, {"values": Values()})

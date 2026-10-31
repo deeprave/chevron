@@ -36,17 +36,17 @@ The renderer SHALL dispatch a callable section value before applying generic fal
 
 ### Requirement: Existing falsey-value rendering remains compatible
 
-The renderer SHALL retain established behaviour for `0`, `False`, empty strings, empty collections, custom falsey values, and values opting into `_CHEVRON_return_scope_when_falsy` across interpolation, unescaped interpolation, normal sections, and inverted sections.
+The renderer SHALL retain established behaviour for `0`, `False`, empty strings, empty collections, and custom falsey values across interpolation, unescaped interpolation, normal sections, and inverted sections.
 
 #### Scenario: Numeric zero and false interpolate unchanged
 
 - **WHEN** an interpolation resolves to `0` or `False`
 - **THEN** it renders using Chevron's existing string conversion behaviour
 
-#### Scenario: Custom falsey value opts into scope preservation
+#### Scenario: Private falsey-value attributes are ignored
 
-- **WHEN** a falsey value sets `_CHEVRON_return_scope_when_falsy`
-- **THEN** Chevron preserves that value according to the established compatibility behaviour
+- **WHEN** a custom falsey value exposes `_CHEVRON_return_scope_when_falsy`
+- **THEN** Chevron does not inspect or honour that attribute and applies ordinary falsey rendering behaviour
 
 #### Scenario: Empty value controls an inverted section
 

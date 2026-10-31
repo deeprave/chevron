@@ -1,5 +1,6 @@
 """Chevron-owned public behavior cases for declared lambda rendering."""
 
+from collections.abc import Iterator
 from typing import Any
 from collections import ChainMap
 from types import MappingProxyType
@@ -8,7 +9,22 @@ import chevron
 from rendering_cases import LambdaMapping, LambdaRenderCase
 
 
+class _CallableIterator(Iterator[str]):
+    def __init__(self) -> None:
+        self.items = iter(("ignored",))
+
+    def __next__(self) -> str:
+        return next(self.items)
+
+    def __call__(self, _body: str, _render: Any) -> str:
+        return "called"
+
+
 class _SyncLambdaFactories:
+    @staticmethod
+    def callable_iterator() -> LambdaMapping:
+        return {"items": _CallableIterator()}
+
     @staticmethod
     def configured_initial_delimiters() -> LambdaMapping:
         @chevron.func
@@ -207,6 +223,12 @@ class _ExplicitMappingLambdaFactories:
 
 
 SYNC_LAMBDA_CASES = (
+    LambdaRenderCase(
+        name="configured callable iterator keeps lambda precedence in an inverted section",
+        template="{{^items}}fallback{{/items}}|{{#items}}body{{/items}}",
+        expected="|called",
+        lambdas_factory=_SyncLambdaFactories.callable_iterator,
+    ),
     LambdaRenderCase(
         name="declared function uses configured initial delimiters",
         template="<<=| |=>>|value|",

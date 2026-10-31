@@ -18,6 +18,7 @@ def test_public_exports_are_available() -> None:
         "compat",
         "func",
         "section",
+        "Extension",
         "__version__",
     ]
     assert callable(chevron.main)

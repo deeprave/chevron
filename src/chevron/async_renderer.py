@@ -1,12 +1,22 @@
 """AnyIO-backed rendering, loaded only by :func:`chevron.async_render`."""
 
-from collections.abc import AsyncIterable, Awaitable, Callable, Iterator, Sequence
+from collections.abc import (
+    AsyncIterable,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterator,
+    Sequence,
+    Sized,
+)
+from dataclasses import dataclass
 import inspect
 import logging
 from pathlib import Path
 from typing import cast
 import anyio
 
+from .extensions import Extension
 from .renderer import (
     _COMPAT_PROTOCOL,
     _END_OF_TOKENS,
@@ -27,6 +37,7 @@ from .renderer import (
     _changed_delimiters,
     _apply_control_token,
     _interpolation_text,
+    _iterator_state,
     _close_awaitable,
     _configured_partial,
     _filesystem_partial_name,
@@ -56,6 +67,45 @@ from .renderer import (
     TokenIterator,
 )
 from .tokenizer import ChevronError, tokenize as _tokenize
+
+
+@dataclass
+class _AsyncIteratorState:
+    """One asynchronous render cursor with tri-state emptiness."""
+
+    iterator: AsyncIterator[TemplateData]
+    empty: bool | None = None
+    first_item: TemplateData | object = _MISSING
+
+    def is_empty(self) -> bool | None:
+        """Return unknown, non-empty, or empty without advancing the cursor."""
+        return self.empty
+
+    async def probe(self) -> bool:
+        """Determine emptiness without losing a first yielded item."""
+        if self.empty is None:
+            try:
+                self.first_item = await anext(self.iterator)
+            except StopAsyncIteration:
+                self.empty = True
+            else:
+                self.empty = False
+        return self.empty
+
+    async def __anext__(self) -> TemplateData:
+        """Yield the buffered item, then continue through the source iterator."""
+        if self.first_item is not _MISSING:
+            item = self.first_item
+            self.first_item = _MISSING
+            return item
+        try:
+            item = await anext(self.iterator)
+        except StopAsyncIteration:
+            if self.empty is None:
+                self.empty = True
+            raise
+        self.empty = False
+        return item
 
 
 def _read_in_worker(reader: Callable[[], TemplateData]) -> tuple[TemplateData]:
@@ -119,6 +169,16 @@ class AsyncChevronRender:
         self.config = config
         self.policy = policy
         self.state = _RenderState()
+
+    def _async_iterator_state(
+        self, frame: _RenderFrame, key: str, value: AsyncIterable[TemplateData]
+    ) -> _AsyncIteratorState:
+        """Return the canonical cursor stored on one supplying render frame."""
+        if state := frame.async_iterator_states.get(key):
+            return cast(_AsyncIteratorState, state)
+        state = _AsyncIteratorState(aiter(value))
+        frame.async_iterator_states[key] = state
+        return state
 
     async def _await_result(self, value: TemplateData) -> TemplateData:
         return await value if inspect.isawaitable(value) else value
@@ -205,7 +265,9 @@ class AsyncChevronRender:
                 work.close_tokens()
         raise RuntimeError("render work completed without a root result")
 
-    def resolve(self, key: str, frame: _RenderFrame) -> tuple[TemplateData, bool]:
+    def resolve(
+        self, key: str, frame: _RenderFrame
+    ) -> tuple[TemplateData, bool, _RenderFrame | None]:
         return self.policy.resolve(
             key,
             frame,
@@ -302,7 +364,10 @@ class AsyncChevronRender:
         work: _RenderWork[Awaitable[None]],
         active: list[_RenderWork[Awaitable[None]]],
     ) -> None:
-        value, _ = self.resolve(key, work.frame)
+        use_inverted_iterators = Extension.is_enabled(Extension.INVERTED_ITERATORS)
+        async_values = None
+        sync_values = None
+        value, _, binding_frame = self.resolve(key, work.frame)
         if isinstance(value, Callable):
             body = await self.collect_section(work.tokens, key, work.delimiters)
             work.delimiters = body.ending
@@ -328,10 +393,23 @@ class AsyncChevronRender:
                     await self.compatibility_section(value, key, body, work.frame)
                 )
             return
+        if not value:
+            work.frame = work.frame.child(_SKIPPED_SECTION_MARKER)
+            return
         if isinstance(value, AsyncIterable):
+            assert binding_frame is not None
+            async_values = (
+                self._async_iterator_state(
+                    binding_frame,
+                    key,
+                    value,
+                )
+                if use_inverted_iterators
+                else aiter(value)
+            )
+        if async_values is not None:
             body = await self.collect_section(work.tokens, key, work.delimiters)
             work.delimiters = body.ending
-            values = aiter(value)
 
             async def render_next(
                 result: str | None = None, terminal_padding: str = ""
@@ -339,7 +417,7 @@ class AsyncChevronRender:
                 if result is not None:
                     work.append(result, terminal_padding=terminal_padding)
                 try:
-                    item = await anext(values)
+                    item = await anext(async_values)
                 except StopAsyncIteration:
                     return
                 child = work.frame.child(item, body.opening, work.frame.padding)
@@ -356,33 +434,49 @@ class AsyncChevronRender:
             await render_next()
             return
         if isinstance(value, (Sequence, Iterator)) and not isinstance(value, str):
-            body = await self.collect_section(work.tokens, key, work.delimiters)
-            work.delimiters = body.ending
-            values = iter(value)
-
-            async def render_next(
-                result: str | None = None, terminal_padding: str = ""
-            ) -> None:
-                if result is not None:
-                    work.append(result, terminal_padding=terminal_padding)
-                try:
-                    item = next(values)
-                except StopIteration:
-                    return
-                child = work.frame.child(item, body.opening, work.frame.padding)
-                _push_work(
-                    active,
-                    _RenderWork.from_tokens(
-                        iter(body.tokens),
-                        child,
-                        render_next,
-                        source_line_has_content=work.source_line_has_content,
-                    ),
+            assert binding_frame is not None
+            sync_values = (
+                (
+                    _iterator_state(
+                        binding_frame,
+                        key,
+                        value,
+                    )
+                    if use_inverted_iterators
+                    else iter(value)
                 )
-
-            await render_next()
+                if isinstance(value, Iterator)
+                else iter(value)
+            )
+        else:
+            work.frame = work.frame.child(value if value else _SKIPPED_SECTION_MARKER)
             return
-        work.frame = work.frame.child(value if value else _SKIPPED_SECTION_MARKER)
+
+        body = await self.collect_section(work.tokens, key, work.delimiters)
+        work.delimiters = body.ending
+
+        async def render_next(
+            result: str | None = None, terminal_padding: str = ""
+        ) -> None:
+            if result is not None:
+                work.append(result, terminal_padding=terminal_padding)
+            try:
+                item = next(sync_values)
+            except StopIteration:
+                return
+            child = work.frame.child(item, body.opening, work.frame.padding)
+            _push_work(
+                active,
+                _RenderWork.from_tokens(
+                    iter(body.tokens),
+                    child,
+                    render_next,
+                    source_line_has_content=work.source_line_has_content,
+                ),
+            )
+
+        await render_next()
+        return
 
     async def _render_partial(
         self,
@@ -555,11 +649,36 @@ class AsyncChevronRender:
             case "section":
                 await self._render_section(key, work, active)
             case "inverted section":
-                value, _ = self.policy.resolve(
+                use_inverted_iterators = Extension.is_enabled(
+                    Extension.INVERTED_ITERATORS
+                )
+                value, _, binding_frame = self.policy.resolve(
                     key, work.frame, lambda value: _normalise_value(key, value)
                 )
+                if not value:
+                    is_empty = True
+                elif isinstance(value, Callable):
+                    is_empty = False
+                elif isinstance(value, Sized):
+                    is_empty = False
+                elif use_inverted_iterators and isinstance(value, AsyncIterable):
+                    assert binding_frame is not None
+                    is_empty = await self._async_iterator_state(
+                        binding_frame,
+                        key,
+                        value,
+                    ).probe()
+                elif use_inverted_iterators and isinstance(value, Iterator):
+                    assert binding_frame is not None
+                    is_empty = _iterator_state(
+                        binding_frame,
+                        key,
+                        value,
+                    ).probe()
+                else:
+                    is_empty = False
                 work.frame = work.frame.child(
-                    _INVERTED_SECTION_MARKER if not value else _SKIPPED_SECTION_MARKER
+                    _INVERTED_SECTION_MARKER if is_empty else _SKIPPED_SECTION_MARKER
                 )
             case "partial":
                 await self._render_partial(key, work, active)
@@ -582,7 +701,7 @@ class AsyncChevronRender:
         work: _RenderWork[Awaitable[None]],
         active: list[_RenderWork[Awaitable[None]]],
     ) -> None:
-        value, explicit = self.resolve(key, work.frame)
+        value, explicit, _ = self.resolve(key, work.frame)
 
         def append_value(result: TemplateData) -> None:
             work.append(_interpolation_text(result, tag))
