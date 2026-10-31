@@ -59,6 +59,45 @@ class _FalseyIterator(Iterator[str]):
         return "unreachable"
 
 
+class _SizedItems(Iterator[str]):
+    """A single-pass source that supplies a stable initial size."""
+
+    def __init__(self) -> None:
+        self.items = ("one", "two", "three")
+        self.index = 0
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def __next__(self) -> str:
+        if self.index == len(self.items):
+            raise StopIteration
+        item = self.items[self.index]
+        self.index += 1
+        return item
+
+    def __getitem__(self, index: int) -> str:
+        return self.items[index]
+
+
+class _LengthTrackingItems(Iterator[str]):
+    """A truthy sized iterator that records whether its length was requested."""
+
+    def __init__(self) -> None:
+        self.items = iter(("one", "two"))
+        self.length_calls = 0
+
+    def __bool__(self) -> bool:
+        return True
+
+    def __len__(self) -> int:
+        self.length_calls += 1
+        return 2
+
+    def __next__(self) -> str:
+        return next(self.items)
+
+
 SECTION_CASES = (
     RenderCase(
         name="inverted sections evaluate mixed sequence items independently",
@@ -201,5 +240,89 @@ ITERATOR_EXTENSION_CASES = (
         template="{{#items}}[{{.}}]{{/items}}|{{#items}}[{{.}}]{{/items}}|{{^items}}fallback{{/items}}",
         expected="[first][second][third]||",
         data_factory=lambda: {"items": _many_items()},
+    ),
+)
+
+
+ITERATION_METADATA_CASES = (
+    RenderCase(
+        name="iteration metadata formats a separator without a trailing comma",
+        template="{{#values}}{{#.first}}- {{/.first}}{{.}}{{^.last}}, {{/.last}}{{/values}}",
+        expected="- one, two, three",
+        data={"values": ["one", "two", "three"]},
+    ),
+    RenderCase(
+        name="iteration metadata preserves a streaming iterator while determining last",
+        template="{{#values}}{{#.first}}- {{/.first}}{{.}}{{^.last}}, {{/.last}}{{/values}}",
+        expected="- first, second, third",
+        data_factory=lambda: {"values": _many_items()},
+    ),
+    RenderCase(
+        name="iteration metadata exposes index ordinal and length",
+        template="{{#values}}{{.index}}/{{.ordinal}}/{{.length}}:{{.}};{{/values}}",
+        expected="0/1/3:one;1/2/3:two;2/3/3:three;",
+        data={"values": ["one", "two", "three"]},
+    ),
+    RenderCase(
+        name="iteration metadata exposes length for a sized iterator",
+        template="{{#values}}{{.length}}:{{.}};{{/values}}",
+        expected="3:one;3:two;3:three;",
+        data_factory=lambda: {"values": _SizedItems()},
+    ),
+    RenderCase(
+        name="iteration metadata keeps an unsized iterator length unavailable",
+        template="{{#values}}[{{.length}}{{^.length}}none{{/.length}}:{{.}}]{{/values}}",
+        expected="[none:first][none:second][none:third]",
+        data_factory=lambda: {"length": "outer", "values": _many_items()},
+    ),
+    RenderCase(
+        name="iteration metadata resolves numeric names from an indexable source",
+        template="{{#values}}{{.index}}={{.0}}/{{.1}}/{{.3}};{{/values}}",
+        expected="0=one/two/;1=one/two/;2=one/two/;",
+        data={
+            "": {"3": "leaked"},
+            "values": ["one", "two", "three"],
+        },
+    ),
+    RenderCase(
+        name="iteration metadata resolves numeric names from an indexable iterator",
+        template="{{#values}}{{.index}}={{.0}}/{{.2}};{{/values}}",
+        expected="0=one/three;1=one/three;2=one/three;",
+        data_factory=lambda: {"values": _SizedItems()},
+    ),
+    RenderCase(
+        name="iteration metadata leaves numeric names unavailable for a generator",
+        template="{{#values}}[{{.0}}{{^.0}}none{{/.0}}:{{.}}]{{/values}}",
+        expected="[none:first][none:second][none:third]",
+        data_factory=lambda: {"": {"0": "leaked"}, "values": _many_items()},
+    ),
+    RenderCase(
+        name="nested repeated sections use their nearest iteration metadata",
+        template="{{#groups}}g{{.index}}:{{#items}}{{.index}}{{/items}}:{{.index}};{{/groups}}",
+        expected="g0:01:0;g1:0:1;",
+        data={
+            "groups": [
+                {"items": ["one", "two"]},
+                {"items": ["three"]},
+            ]
+        },
+    ),
+    RenderCase(
+        name="iteration metadata preserves named fields on mapping items",
+        template="{{#items}}{{name}}/{{.index}}/{{.length}};{{/items}}",
+        expected="one/0/2;two/1/2;",
+        data={"items": [{"name": "one"}, {"name": "two"}]},
+    ),
+    RenderCase(
+        name="nested same-binding sections restart positional metadata",
+        template="{{#items}}outer={{.index}}({{#items}}inner={{.index}}/{{.first}};{{/items}}){{/items}}",
+        expected="outer=0(inner=0/True;inner=1/False;)",
+        data_factory=lambda: {"items": iter(("a", "b", "c"))},
+    ),
+    RenderCase(
+        name="invalid leading-dot names remain unavailable metadata",
+        template="{{#items}}[{{.-1}}|{{.unknown}}]{{/items}}",
+        expected="[|]",
+        data={"items": [{"": {"-1": "unexpected", "unknown": "unexpected"}}]},
     ),
 )

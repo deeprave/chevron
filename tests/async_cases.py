@@ -33,6 +33,12 @@ async def _nested_items() -> AsyncIterator[str]:
     yield "c"
 
 
+async def _metadata_items() -> AsyncIterator[str]:
+    yield "first"
+    yield "second"
+    yield "third"
+
+
 async def _numbered_items() -> AsyncIterator[int]:
     yield 1
     yield 2
@@ -268,5 +274,21 @@ ASYNC_ITERATOR_EXTENSION_CASES = (
         template="{{#items}}[{{.}}]{{/items}}|{{#items}}[{{.}}]{{/items}}|{{^items}}fallback{{/items}}",
         expected="[first][second][third]||",
         data_factory=lambda: {"items": _many_items()},
+    ),
+)
+
+
+ASYNC_ITERATION_METADATA_CASES = (
+    RenderCase(
+        name="async iteration metadata preserves streaming last and unavailable length",
+        template="{{#values}}{{.index}}/{{.ordinal}}/{{.length}}{{^.length}}none{{/.length}}:{{.}}{{^.last}},{{/.last}}{{/values}}",
+        expected="0/1/none:first,1/2/none:second,2/3/none:third",
+        data_factory=lambda: {"values": _metadata_items()},
+    ),
+    RenderCase(
+        name="async nested same-binding sections restart positional metadata",
+        template="{{#items}}outer={{.index}}({{#items}}inner={{.index}}/{{.first}};{{/items}}){{/items}}",
+        expected="outer=0(inner=0/True;inner=1/False;)",
+        data_factory=lambda: {"items": _nested_items()},
     ),
 )

@@ -241,6 +241,14 @@ def _get_key(
 
     blocked_callable_traversal = False
 
+    if key.startswith(".") and key != ".":
+        metadata, metadata_frame = _iteration_metadata_value(key, frame)
+        if metadata is not _MISSING:
+            value = value_handler(metadata) if value_handler is not None else metadata
+            if log_resolution:
+                logger.debug("Resolved iteration metadata '%s'", key)
+            return value, metadata_frame
+
     # If the key is a dot
     if key == ".":
         # Then just return the current scope
@@ -437,6 +445,60 @@ class _RenderConfig:
     default_delimiters: tuple[str, str]
 
 
+def _iteration_metadata_value(
+    key: str, frame: "_RenderFrame"
+) -> tuple[TemplateData | object, "_RenderFrame | None"]:
+    """Find the nearest repeated-section metadata binding for one name."""
+    current_frame: _RenderFrame | None = frame
+    while current_frame is not None:
+        source = current_frame.iteration_source
+        if source is not _MISSING:
+            match key:
+                case ".first":
+                    return current_frame.iteration_index == 0, current_frame
+                case ".last":
+                    last = current_frame.iteration_last
+                    if last is None:
+                        length = _source_length(source)
+                        last = (
+                            length is not None
+                            and current_frame.iteration_index == length - 1
+                        )
+                    return last, current_frame
+                case ".index":
+                    return current_frame.iteration_index, current_frame
+                case ".ordinal":
+                    return current_frame.iteration_index + 1, current_frame
+                case ".length":
+                    return _source_length(source), current_frame
+            numeric = key[1:]
+            if not numeric.isdecimal():
+                return None, current_frame
+            try:
+                index = int(numeric)
+            except ValueError:
+                return None, current_frame
+            length = _source_length(source)
+            item_at = getattr(source, "__getitem__", None)
+            if length is None or index >= length or not callable(item_at):
+                return None, current_frame
+            try:
+                return item_at(index), current_frame
+            except (IndexError, KeyError, TypeError):
+                return None, current_frame
+        current_frame = current_frame.parent
+    return _MISSING, None
+
+
+def _source_length(value: TemplateData) -> int | None:
+    """Return a non-consuming source length while retaining mapping semantics."""
+    return (
+        len(value)
+        if isinstance(value, Sized) and not isinstance(value, Mapping)
+        else None
+    )
+
+
 @dataclass(frozen=True)
 class _RenderFrame:
     """One private scope binding and its render context."""
@@ -452,6 +514,11 @@ class _RenderFrame:
     async_iterator_states: dict[str, object] = field(
         default_factory=dict, compare=False, repr=False
     )
+    iteration_source: TemplateData | object = field(
+        default=_MISSING, compare=False, repr=False
+    )
+    iteration_index: int = field(default=0, compare=False, repr=False)
+    iteration_last: bool | None = field(default=None, compare=False, repr=False)
 
     @classmethod
     def from_scopes(
@@ -478,6 +545,9 @@ class _RenderFrame:
         scope: Scope,
         delimiters: tuple[str, str] | None = None,
         padding: str | None = None,
+        iteration_source: TemplateData | object = _MISSING,
+        iteration_index: int = 0,
+        iteration_last: bool | None = None,
     ) -> "_RenderFrame":
         """Return a nested scope frame, preserving the current chain."""
         return _RenderFrame(
@@ -486,6 +556,9 @@ class _RenderFrame:
             self.delimiters if delimiters is None else delimiters,
             self.padding if padding is None else padding,
             self.overrides,
+            iteration_source=iteration_source,
+            iteration_index=iteration_index,
+            iteration_last=iteration_last,
         )
 
     def with_context(
@@ -500,6 +573,9 @@ class _RenderFrame:
             self.overrides,
             self.iterator_states,
             self.async_iterator_states,
+            self.iteration_source,
+            self.iteration_index,
+            self.iteration_last,
         )
 
     def with_overrides(self, overrides: Mapping[str, "_SectionBody"]) -> "_RenderFrame":
@@ -514,6 +590,9 @@ class _RenderFrame:
             MappingProxyType(combined),
             self.iterator_states,
             self.async_iterator_states,
+            self.iteration_source,
+            self.iteration_index,
+            self.iteration_last,
         )
 
     def without_override(self, key: str) -> "_RenderFrame":
@@ -530,6 +609,9 @@ class _RenderFrame:
             MappingProxyType(overrides),
             self.iterator_states,
             self.async_iterator_states,
+            self.iteration_source,
+            self.iteration_index,
+            self.iteration_last,
         )
 
 
@@ -538,6 +620,7 @@ class _IteratorState:
     """One synchronous render cursor with tri-state emptiness."""
 
     iterator: Iterator[TemplateData]
+    sized: bool
     empty: bool | None = None
     first_item: TemplateData | object = _MISSING
 
@@ -571,6 +654,17 @@ class _IteratorState:
         self.empty = False
         return item
 
+    def next_with_last(self) -> tuple[TemplateData, bool | None]:
+        """Yield one item and retain bounded lookahead for an unsized source."""
+        item = next(self)
+        if self.sized:
+            return item, None
+        try:
+            self.first_item = next(self.iterator)
+        except StopIteration:
+            return item, True
+        return item, False
+
 
 @dataclass
 class _RenderState:
@@ -585,7 +679,9 @@ def _iterator_state(
     """Return the canonical cursor stored on one supplying render frame."""
     if state := frame.iterator_states.get(key):
         return state
-    state = _IteratorState(iter(value))
+    state = _IteratorState(
+        iter(value), isinstance(value, Sized) and not isinstance(value, Mapping)
+    )
     frame.iterator_states[key] = state
     return state
 
@@ -1333,7 +1429,7 @@ class ChevronRender:
         work: _RenderWork[None],
         active: list[_RenderWork[None]],
     ) -> None:
-        use_inverted_iterators = Extension.is_enabled(Extension.INVERTED_ITERATORS)
+        use_enhanced_iterators = Extension.is_enabled(Extension.ENHANCED_ITERATORS)
         value, _, binding_frame = self.resolve(key, work.frame)
         if isinstance(value, AsyncIterable):
             raise TypeError(
@@ -1371,7 +1467,7 @@ class ChevronRender:
                         key,
                         value,
                     )
-                    if use_inverted_iterators
+                    if use_enhanced_iterators
                     else iter(value)
                 )
                 if isinstance(value, Iterator)
@@ -1384,14 +1480,32 @@ class ChevronRender:
         body = _collect_body(work.tokens, key, work.delimiters)
         work.delimiters = body.ending
 
+        index = 0
+
         def render_next(result: str | None = None, terminal_padding: str = "") -> None:
+            nonlocal index
             if result is not None:
                 work.append(result, terminal_padding=terminal_padding)
             try:
-                item = next(values)
+                if not use_enhanced_iterators:
+                    item = next(values)
+                    last = None
+                elif isinstance(values, _IteratorState):
+                    item, last = values.next_with_last()
+                else:
+                    item = next(values)
+                    last = None
             except StopIteration:
                 return
-            child = work.frame.child(item, body.opening, work.frame.padding)
+            index += 1
+            child = work.frame.child(
+                item,
+                body.opening,
+                work.frame.padding,
+                value if use_enhanced_iterators else _MISSING,
+                index - 1,
+                last,
+            )
             _push_work(
                 active,
                 _RenderWork.from_tokens(
@@ -1556,8 +1670,8 @@ class ChevronRender:
             case "section":
                 self._render_section(key, work, active)
             case "inverted section":
-                use_inverted_iterators = Extension.is_enabled(
-                    Extension.INVERTED_ITERATORS
+                use_enhanced_iterators = Extension.is_enabled(
+                    Extension.ENHANCED_ITERATORS
                 )
                 value, _, binding_frame = self.policy.resolve(
                     key, work.frame, lambda value: _normalise_value(key, value)
@@ -1573,7 +1687,7 @@ class ChevronRender:
                     is_empty = False
                 elif isinstance(value, Sized):
                     is_empty = False
-                elif use_inverted_iterators and isinstance(value, Iterator):
+                elif use_enhanced_iterators and isinstance(value, Iterator):
                     assert binding_frame is not None
                     is_empty = _iterator_state(
                         binding_frame,

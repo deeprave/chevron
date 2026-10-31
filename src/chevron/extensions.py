@@ -7,8 +7,8 @@ class Extension(IntFlag, boundary=FlagBoundary.STRICT):
     """Optional non-standard Chevron behaviour configured at application startup."""
 
     NONE = 0
-    INVERTED_ITERATORS = auto()
-    ALL = INVERTED_ITERATORS
+    ENHANCED_ITERATORS = auto()
+    ALL = ENHANCED_ITERATORS
 
     @classmethod
     def enable(cls, extensions: "Extension") -> None:
