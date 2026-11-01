@@ -27,7 +27,9 @@ _LOGGER_NAME = "chevron"
 _DEFAULT_LOGGER = logging.getLogger(_LOGGER_NAME)
 _MAX_ACTIVE_WORK = 10_000
 _END_OF_TOKENS = object()
-_BODY_OPENERS = frozenset(("section", "inverted section", "parent", "block"))
+_BODY_OPENERS = frozenset(
+    ("section", "inverted section", "conditional section", "parent", "block")
+)
 
 TemplateData: TypeAlias = Any
 """A value exposed to Mustache lookup, intentionally dynamically typed."""
@@ -686,6 +688,27 @@ def _iterator_state(
     return state
 
 
+def _section_value_is_empty(
+    value: TemplateData,
+    binding_frame: _RenderFrame | None,
+    key: str,
+    *,
+    observe_stream: bool,
+) -> bool:
+    """Apply section truthiness rules, probing a stream only when required."""
+    if not value:
+        return True
+    if isinstance(value, (Callable, Sized)):
+        return False
+    if isinstance(value, Iterator) and binding_frame is not None:
+        state = binding_frame.iterator_states.get(key)
+        if state is not None:
+            return state.probe()
+        if observe_stream:
+            return _iterator_state(binding_frame, key, value).probe()
+    return False
+
+
 @dataclass
 class _RenderWork(Generic[ContinuationResult]):
     """One active token stream and the state needed to resume it."""
@@ -731,6 +754,12 @@ class _RenderWork(Generic[ContinuationResult]):
             continuation,
             source_line_has_content=source_line_has_content,
         )
+
+    def copy_line_state_from(self, source: "_RenderWork[ContinuationResult]") -> None:
+        """Continue rendering on the same output line as the source work."""
+        self.current_line_padding = source.current_line_padding.copy()
+        self.current_line_has_content = source.current_line_has_content
+        self.current_line_is_whitespace = source.current_line_is_whitespace
 
     def append(self, text: str, terminal_padding: str = "") -> None:
         """Append output and retain the suffix needed for partial padding."""
@@ -1004,6 +1033,7 @@ _TAG_SYMBOLS = {
     "comment": "!",
     "section": "#",
     "inverted section": "^",
+    "conditional section": "?",
     "end": "/",
     "partial": ">",
     "parent": "<",
@@ -1319,7 +1349,12 @@ class ChevronRender:
                 template = _read_sync_template(reader)
             if not template and not isinstance(template, str):
                 template = ""
-            tokens = _tokenize(template, *frame.delimiters, include_raw=True)
+            tokens = _tokenize(
+                template,
+                *frame.delimiters,
+                include_raw=True,
+                diagnostic=self.config.logger.warning,
+            )
         return _RenderWork[None](
             tokens,
             frame,
@@ -1460,17 +1495,11 @@ class ChevronRender:
             return
         if isinstance(value, (Sequence, Iterator)) and not isinstance(value, str):
             assert binding_frame is not None
+            state = binding_frame.iterator_states.get(key)
             values = (
-                (
-                    _iterator_state(
-                        binding_frame,
-                        key,
-                        value,
-                    )
-                    if use_enhanced_iterators
-                    else iter(value)
-                )
+                _iterator_state(binding_frame, key, value)
                 if isinstance(value, Iterator)
+                and (use_enhanced_iterators or state is not None)
                 else iter(value)
             )
         else:
@@ -1487,13 +1516,19 @@ class ChevronRender:
             if result is not None:
                 work.append(result, terminal_padding=terminal_padding)
             try:
+                state = (
+                    binding_frame.iterator_states.get(key)
+                    if isinstance(value, Iterator)
+                    else None
+                )
+                active_values = state if state is not None else values
                 if not use_enhanced_iterators:
-                    item = next(values)
+                    item = next(active_values)
                     last = None
-                elif isinstance(values, _IteratorState):
-                    item, last = values.next_with_last()
+                elif isinstance(active_values, _IteratorState):
+                    item, last = active_values.next_with_last()
                 else:
-                    item = next(values)
+                    item = next(active_values)
                     last = None
             except StopIteration:
                 return
@@ -1506,18 +1541,43 @@ class ChevronRender:
                 index - 1,
                 last,
             )
-            _push_work(
-                active,
-                _RenderWork.from_tokens(
-                    iter(body.tokens),
-                    child,
-                    render_next,
-                    source_line_has_content=work.source_line_has_content,
-                ),
+            next_work = _RenderWork.from_tokens(
+                iter(body.tokens),
+                child,
+                render_next,
+                source_line_has_content=work.source_line_has_content,
             )
+            _push_work(active, next_work)
 
         render_next()
         return
+
+    def _render_conditional_section(
+        self,
+        key: str,
+        work: _RenderWork[None],
+        active: list[_RenderWork[None]],
+    ) -> None:
+        """Render one body when its value is truthy without changing scope."""
+        body = _collect_body(work.tokens, key, work.delimiters)
+        work.delimiters = body.ending
+        value, _, binding_frame = self.resolve(key, work.frame)
+        if isinstance(value, AsyncIterable):
+            raise TypeError(
+                f"Conditional section '{key}' resolved to an async iterable; "
+                "use chevron.async_render instead"
+            )
+        if _section_value_is_empty(value, binding_frame, key, observe_stream=True):
+            return
+        frame = work.frame.with_context(body.opening, work.frame.padding)
+        conditional_work = _RenderWork.from_tokens(
+            iter(body.tokens),
+            frame,
+            work.append,
+            source_line_has_content=work.source_line_has_content,
+        )
+        conditional_work.copy_line_state_from(work)
+        _push_work(active, conditional_work)
 
     def _render_partial(
         self, key: str, work: _RenderWork[None], active: list[_RenderWork[None]]
@@ -1669,33 +1729,29 @@ class ChevronRender:
                 self._render_interpolation(key, tag, work, active)
             case "section":
                 self._render_section(key, work, active)
+            case "conditional section":
+                if not Extension.is_enabled(Extension.CONDITIONAL_SECTIONS):
+                    raise ChevronError(
+                        "Conditional sections require "
+                        "Extension.CONDITIONAL_SECTIONS to be enabled"
+                    )
+                self._render_conditional_section(key, work, active)
             case "inverted section":
                 use_enhanced_iterators = Extension.is_enabled(
                     Extension.ENHANCED_ITERATORS
                 )
-                value, _, binding_frame = self.policy.resolve(
-                    key, work.frame, lambda value: _normalise_value(key, value)
-                )
+                value, _, binding_frame = self.resolve(key, work.frame)
                 if isinstance(value, AsyncIterable):
                     raise TypeError(
                         f"Section '{key}' resolved to an async iterable; "
                         "use chevron.async_render instead"
                     )
-                if not value:
-                    is_empty = True
-                elif isinstance(value, Callable):
-                    is_empty = False
-                elif isinstance(value, Sized):
-                    is_empty = False
-                elif use_enhanced_iterators and isinstance(value, Iterator):
-                    assert binding_frame is not None
-                    is_empty = _iterator_state(
-                        binding_frame,
-                        key,
-                        value,
-                    ).probe()
-                else:
-                    is_empty = False
+                is_empty = _section_value_is_empty(
+                    value,
+                    binding_frame,
+                    key,
+                    observe_stream=use_enhanced_iterators,
+                )
                 work.frame = work.frame.child(
                     _INVERTED_SECTION_MARKER if is_empty else _SKIPPED_SECTION_MARKER
                 )

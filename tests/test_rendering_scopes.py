@@ -5,6 +5,7 @@ from typing import overload
 import pytest
 
 import chevron
+from chevron import Extension
 
 
 def test_deep_iterable_sections_do_not_use_the_python_call_stack() -> None:
@@ -97,6 +98,15 @@ def test_sync_render_rejects_async_iterable_inverted_sections() -> None:
 
     with pytest.raises(TypeError, match="use chevron.async_render"):
         chevron.render("{{^values}}empty{{/values}}", {"values": values()})
+
+
+def test_sync_conditional_section_rejects_async_iterables(enable_extensions) -> None:
+    async def values():
+        yield "value"
+
+    enable_extensions(Extension.CONDITIONAL_SECTIONS)
+    with pytest.raises(TypeError, match="use chevron.async_render"):
+        chevron.render("{{?values}}present{{/values}}", {"values": values()})
 
 
 @pytest.mark.parametrize(

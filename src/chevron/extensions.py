@@ -8,7 +8,8 @@ class Extension(IntFlag, boundary=FlagBoundary.STRICT):
 
     NONE = 0
     ENHANCED_ITERATORS = auto()
-    ALL = ENHANCED_ITERATORS
+    CONDITIONAL_SECTIONS = auto()
+    ALL = ENHANCED_ITERATORS | CONDITIONAL_SECTIONS
 
     @classmethod
     def enable(cls, extensions: "Extension") -> None:

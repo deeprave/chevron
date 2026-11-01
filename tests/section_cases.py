@@ -98,6 +98,15 @@ class _LengthTrackingItems(Iterator[str]):
         return next(self.items)
 
 
+class ConditionalCallable:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self, _body: str) -> str:
+        self.calls += 1
+        return "called"
+
+
 SECTION_CASES = (
     RenderCase(
         name="inverted sections evaluate mixed sequence items independently",
@@ -116,6 +125,85 @@ SECTION_CASES = (
         template="{{#items}}{{^items}}empty{{/items}}{{name}};{{/items}}",
         data={"items": [{"name": "first"}, {"name": "second"}]},
         expected="first;second;",
+    ),
+    RenderCase(
+        name="iterated section retains established inline partial indentation",
+        template="  {{#items}}{{>row}}{{/items}}\nZ\n",
+        data={"items": [1]},
+        partials={"row": "<{{.}}>\n  row\n"},
+        expected="  <1>\n  row\n\nZ\n",
+    ),
+)
+
+
+CONDITIONAL_SECTION_CASES = (
+    RenderCase(
+        name="conditional section renders a truthy scalar once",
+        template="{{?enabled}}shown{{/enabled}}",
+        data={"enabled": True},
+        expected="shown",
+    ),
+    RenderCase(
+        name="conditional section skips falsey and missing values",
+        template="{{?missing}}missing{{/missing}}{{?empty}}empty{{/empty}}",
+        data={"empty": []},
+        expected="",
+    ),
+    RenderCase(
+        name="conditional section preserves the active mapping context",
+        template="{{?settings}}{{name}}/{{theme}}{{/settings}}",
+        data={"name": "outer", "settings": {"theme": "dark"}},
+        expected="outer/",
+    ),
+    RenderCase(
+        name="conditional section does not repeat a collection",
+        template="{{?items}}({{name}}){{/items}}",
+        data={"name": "outer", "items": ["one", "two"]},
+        expected="(outer)",
+    ),
+    RenderCase(
+        name="conditional section preserves a streaming item for an ordinary section",
+        template="{{?items}}ready{{/items}}{{#items}}[{{.}}]{{/items}}",
+        data_factory=lambda: {"items": _many_items()},
+        expected="ready[first][second][third]",
+    ),
+    RenderCase(
+        name="conditional dotted lookup preserves a streaming item for the same name",
+        template="{{?a.items}}ready{{/a.items}}{{#a.items}}[{{.}}]{{/a.items}}",
+        data_factory=lambda: {"a": {"items": _many_items()}},
+        expected="ready[first][second][third]",
+    ),
+    RenderCase(
+        name="conditional section inside iteration preserves the next streaming item",
+        template="{{#items}}[{{.}}]{{?items}}!{{/items}}{{/items}}",
+        data_factory=lambda: {"items": _many_items()},
+        expected="[first]![second]![third]!",
+    ),
+    RenderCase(
+        name="conditional section inside a partial preserves the next streaming item",
+        template="{{#items}}{{>row}}{{/items}}",
+        data_factory=lambda: {"items": _many_items()},
+        partials={"row": "[{{.}}]{{?items}}!{{/items}}"},
+        expected="[first]![second]![third]!",
+    ),
+    RenderCase(
+        name="conditional section preserves partial indentation on its source line",
+        template="A\n  {{?enabled}}{{>part}}{{/enabled}}\nZ\n",
+        data={"enabled": True},
+        partials={"part": "one\ntwo"},
+        expected="A\n  one\n  two\nZ\n",
+    ),
+    RenderCase(
+        name="conditional and inverted sections agree on empty streaming items",
+        template="{{?items}}ready{{/items}}{{^items}}empty{{/items}}",
+        data_factory=lambda: {"items": _empty_items()},
+        expected="empty",
+    ),
+    RenderCase(
+        name="conditional section skips an empty streaming iterator",
+        template="{{?items}}ready{{/items}}",
+        data_factory=lambda: {"items": _empty_items()},
+        expected="",
     ),
 )
 

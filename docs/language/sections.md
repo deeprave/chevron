@@ -6,6 +6,22 @@ Within a section whose value is a scalar, `{{.}}` interpolates that current valu
 
 Inverted sections use `{{^name}}...{{/name}}`. They select their content when `name` is missing, false, or empty, and skip it when `name` is truthy. Use an inverted section beside an ordinary section when a template needs a fallback for absent content.
 
+## Conditional sections
+
+`{{?name}}...{{/name}}` is a Chevron extension for testing a value without changing the current context or repeating the body. It renders its body once when `name` is truthy, otherwise it renders nothing.
+
+```mustache
+{{?changes}}
+## {{version}} changes
+{{/changes}}
+```
+
+If `changes` is a non-empty collection, the heading renders once, but `{{version}}` still resolves from the surrounding context. Unlike `{{#changes}}`, the collection does not become the current context and its items are not iterated. A callable is tested as a value and is not invoked.
+
+Conditional sections require `Extension.CONDITIONAL_SECTIONS` to be enabled once during application startup. Until then, `?` remains part of an ordinary variable name, so `{{?name}}` can interpolate data stored under that literal name. A paired `{{?name}}...{{/name}}` still has an unmatched closing tag; Chevron logs a warning naming the extension before raising its ordinary structural template error.
+
+For an unsized iterator or async iterable, Chevron may observe one item to establish truthiness and retains that item for a later ordinary section using the same lookup name in the same render frame. Use that same name again, such as `{{#a.b}}`, rather than reaching the source through an equivalent nested lookup such as `{{#a}}{{#b}}`. A probed async iterable continues through the retained cursor, so a re-iterable source becomes single-pass for the rest of that frame. Sized collections use their normal Python truthiness. Conditional sections do not expose enhanced iteration metadata; enable `Extension.ENHANCED_ITERATORS` separately when a repeated section needs `.first`, `.last`, or related values.
+
 ## Repeating a section
 
 Sections are Mustache's loop construct: a section whose value is a list, tuple, or iterator renders its body once for each item. There is no separate loop syntax. This template renders a release summary:
