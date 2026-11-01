@@ -248,7 +248,7 @@ wheels = [
 
 [[package]]
 name = "chevron-ng"
-version = "0.17.1"
+version = "0.20.0"
 source = { editable = "." }
 
 [package.optional-dependencies]
