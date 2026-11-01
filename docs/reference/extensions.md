@@ -17,9 +17,7 @@ The first `Extension.enable()` call selects the complete, process-wide extension
 `Extension.NONE` is the default. Enable more than one extension with `|`:
 
 ```python
-Extension.enable(
-    Extension.ENHANCED_ITERATORS | Extension.CONDITIONAL_SECTIONS
-)
+Extension.enable(Extension.ENHANCED_ITERATORS | Extension.CONDITIONAL_SECTIONS)
 ```
 
 `Extension.ALL` enables every extension implemented by the installed Chevron version:
