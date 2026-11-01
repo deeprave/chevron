@@ -12,8 +12,8 @@ Chevron SHALL expose an `Extension` bitmask for optional, non-standard rendering
 
 #### Scenario: An application enables one extension
 
-- **WHEN** an application calls `Extension.enable(Extension.INVERTED_ITERATORS)` before rendering
-- **THEN** subsequent renders apply that extension
+- **WHEN** an application calls `Extension.enable(Extension.ENHANCED_ITERATORS)` before rendering
+- **THEN** subsequent renders apply empty-iterator inversion and section iteration metadata
 
 #### Scenario: An application configures all current extensions
 
@@ -47,3 +47,17 @@ Extension configuration is process-wide application-startup configuration. An ap
 
 - **WHEN** an application calls `Extension.enable()` after the extension mask has been configured
 - **THEN** Chevron raises `RuntimeError`
+
+### Requirement: Conditional sections use an independent extension
+
+Chevron SHALL expose `Extension.CONDITIONAL_SECTIONS` as an independently selectable extension. Enabling it SHALL apply conditional-section syntax without requiring `Extension.ENHANCED_ITERATORS`; `Extension.ALL` SHALL include it.
+
+#### Scenario: Application enables conditional sections alone
+
+- **WHEN** an application calls `Extension.enable(Extension.CONDITIONAL_SECTIONS)` before rendering
+- **THEN** conditional sections are enabled and enhanced iterator metadata remains disabled
+
+#### Scenario: Application enables every extension
+
+- **WHEN** an application calls `Extension.enable(Extension.ALL)` before rendering
+- **THEN** conditional sections and every other implemented extension are enabled

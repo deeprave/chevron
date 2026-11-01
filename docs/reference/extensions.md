@@ -1,10 +1,10 @@
 # Chevron extensions
 
-Chevron adds a small set of documented interfaces around Mustache rather than changing the ordinary value, section, and partial model.
+Chevron extensions are opt-in behaviour beyond the Mustache specification. They leave ordinary Mustache templates unchanged and are disabled by default. This chapter is the reference for choosing and configuring them; the [template-language chapters](../language/index.md) explain how their syntax behaves in a template.
 
-## Optional rendering extensions
+## Enable extensions once at startup
 
-`chevron.Extension` controls optional rendering behaviour that the Mustache specification does not define. Configure extensions once during application startup, before the application begins rendering templates. They are process-wide settings; changing them later at runtime or while a render is active is outside Chevron's supported contract.
+Configure extensions before the application performs its first render:
 
 ```python
 from chevron import Extension
@@ -12,30 +12,129 @@ from chevron import Extension
 Extension.enable(Extension.ENHANCED_ITERATORS)
 ```
 
-`ENHANCED_ITERATORS` makes an empty Python iterator or async iterable select its paired inverted section, just as an empty list does. Within a repeated section it also exposes `.first`, `.last`, `.index`, `.ordinal`, and `.length`; sized, indexable sources additionally expose `.0`, `.1`, and later values. It gives a streaming source one cursor for the render, retaining only the bounded lookahead needed for inversion and last-item metadata. See [sections](../language/sections.md#iterators-and-generators) for the template contract.
+The first `Extension.enable()` call selects the complete, process-wide extension mask and freezes it. A later call raises `RuntimeError`. Chevron deliberately has no per-template or per-render switch, and changing the setting while rendering is not supported. Choose the mask once during application startup, alongside other application-wide configuration.
 
-`CONDITIONAL_SECTIONS` enables `{{?name}}...{{/name}}`, which tests `name` and renders its body once without changing the active context or iterating the value. It is independent of `ENHANCED_ITERATORS`; enable it alone when templates need only conditional sections, or combine both flags when they need both extensions. Without this extension, `?` remains part of an ordinary variable name. See [conditional sections](../language/sections.md#conditional-sections).
+`Extension.NONE` is the default. Enable more than one extension with `|`:
 
-Enable every extension implemented by the installed Chevron version with `Extension.ALL`:
+```python
+Extension.enable(
+    Extension.ENHANCED_ITERATORS | Extension.CONDITIONAL_SECTIONS
+)
+```
+
+`Extension.ALL` enables every extension implemented by the installed Chevron version:
 
 ```python
 Extension.enable(Extension.ALL)
 ```
 
-`Extension.NONE` is the default. The first call to `enable()` selects the complete process-wide extension mask and freezes it; a later call raises `RuntimeError`. Configure extensions during application startup, before rendering any templates. Renderer code can inspect a particular setting with `Extension.is_enabled(...)`; applications normally only need `enable()` during startup.
+Use an explicit mask when an application needs a deliberately stable set of behaviours. Use `ALL` when adopting every extension supplied by the installed version is intended.
 
-## Explicit lambda protocols
+## Enhanced iterators
 
-`chevron.func`, `chevron.section`, and `chevron.compat` make a callable's template role explicit. Passing a `lambdas` mapping enables explicit mode, where undeclared callable data is rejected and the mapping takes precedence. This is a Chevron API feature; see [Lambdas](../language/lambdas.md).
+`Extension.ENHANCED_ITERATORS` adds two related behaviours for Python iterators and asynchronous iterables:
 
-## Async rendering
+- An empty streaming value selects its inverted section, as an empty list does.
+- A repeated section exposes positional metadata for its current item.
 
-`async_render()` integrates with a caller-owned AnyIO runtime. It awaits declared lambdas, async readers, and async iterables while preserving ordinary Mustache output semantics. It is an API extension, not an alternative template syntax; see [async rendering](../api/async-render.md).
+### Empty streaming values
 
-## Safe filesystem partials
+Without the extension, an iterator object is truthy even after it has yielded its last value. With the extension, Chevron may observe one value to determine whether a stream is empty. That observed value remains available when the ordinary section renders later in the same supplying context.
 
-Library filesystem partials are opt-in. `partials_path` confines resolved partial files to one directory and rejects absolute or escaping names. This is an application boundary, not a claim that rendering untrusted data is generally safe; see [`render()`](../api/render.md).
+```mustache
+{{^events}}No events recorded.{{/events}}
+{{#events}}- {{.}}
+{{/events}}
+```
 
-## Direct token streams
+With `events` set to `iter(())`, the output is:
 
-The `chevron.tokenizer` submodule exposes pre-parsing for applications that own template caching or inspection. It does not introduce a compiled-template format or change the template language. See [the tokenizer API](../api/tokenizer.md).
+```text
+No events recorded.
+```
+
+With `events` set to `iter(["created", "published"])`, it is:
+
+```text
+- created
+- published
+```
+
+Chevron does not materialise a stream or clone it. A streaming iterator or asynchronous iterable has one traversal for a given name in its supplying context during a render. Once it is exhausted, a later ordinary section using that name has no items. Lists and tuples remain normally reusable and can be repeated in separate sections.
+
+### Positional metadata
+
+Inside a repeated section, Chevron reserves leading-dot names other than `{{.}}` for metadata. The original item remains available as `{{.}}`.
+
+```mustache
+{{#steps}}
+Step {{.ordinal}} of {{.length}}: {{.}}
+{{/steps}}
+```
+
+For `steps=["draft", "review", "publish"]`, this renders:
+
+```text
+Step 1 of 3: draft
+Step 2 of 3: review
+Step 3 of 3: publish
+```
+
+| Name | Value |
+| --- | --- |
+| `.first` | True for the first item. |
+| `.last` | True for the final item when Chevron can determine it. |
+| `.index` | Zero-based position. |
+| `.ordinal` | One-based position. |
+| `.length` | Source length when `__len__` is available; otherwise `None`. |
+| `.0`, `.1`, … | Values at non-negative indexes when the source supports both `__len__` and `__getitem__`; otherwise `None`. |
+
+For example, `.first` and `.last` can format a comma-separated list without a trailing comma:
+
+```mustache
+{{#names}}{{#.first}}Contributors: {{/.first}}{{.}}{{^.last}}, {{/.last}}{{/names}}
+```
+
+With `names=["Ari", "Blake", "Casey"]`, this produces `Contributors: Ari, Blake, Casey`. Metadata is scoped to the nearest repeated section. Mapping sections retain normal Mustache context behaviour: Chevron does not iterate a mapping's keys or entries to create metadata.
+
+## Conditional sections
+
+`Extension.CONDITIONAL_SECTIONS` enables `{{?name}}...{{/name}}`. It tests a value and renders its body once only when the value is truthy. Unlike an ordinary section, it neither changes the active context nor repeats its body for a collection.
+
+```python
+from chevron import Extension
+
+Extension.enable(Extension.CONDITIONAL_SECTIONS)
+```
+
+```mustache
+{{?changes}}
+## {{release_name}}
+{{/changes}}
+```
+
+Given:
+
+```python
+{
+    "release_name": "0.18.0",
+    "changes": [{"summary": "Conditional sections"}],
+}
+```
+
+the output is `## 0.18.0`. `changes` establishes whether the body renders, but it does not become the current context. `{{release_name}}` therefore continues to resolve from the surrounding data, and a non-empty `changes` collection still renders the body only once. A callable is tested as a value and is not invoked by a conditional section.
+
+When this extension is disabled, `?` remains part of an ordinary variable name. For example, `{{?changes}}` can interpolate a context value stored under the literal key `"?changes"`. A paired `{{?changes}}...{{/changes}}` is structurally invalid until the extension is enabled; Chevron logs a warning naming `Extension.CONDITIONAL_SECTIONS` before raising its ordinary template error.
+
+For an unsized iterator or asynchronous iterable, a conditional section may observe one item to establish truthiness and retains it for a later ordinary section using the identical lookup name in the same render frame. Conditional sections do not expose positional metadata; enable `ENHANCED_ITERATORS` separately when a repeated section needs it.
+
+## Other Chevron APIs
+
+The following opt-in APIs are not extensions and do not use `Extension.enable()`:
+
+- [Lambdas](../language/lambdas.md) documents `chevron.func`, `chevron.section`, and `chevron.compat`.
+- [Async rendering](../api/async-render.md) documents `async_render()` and its optional AnyIO support.
+- [`render()`](../api/render.md) documents filesystem-partial confinement.
+- [The tokenizer API](../api/tokenizer.md) documents pre-parsed token streams.
+
+For release-to-release differences from Chevron 0.14.0, see the [compatibility reference](compatibility.md).

@@ -77,7 +77,7 @@ Sections are also the historical shape of Mustache lambdas. Chevron supports the
 
 ## Iterators and generators
 
-Python iterators and asynchronous iterables are streaming section sources. By default, Chevron follows ordinary Python truthiness for them: an iterator object is truthy even when it has no remaining items. Enable [`Extension.ENHANCED_ITERATORS`](../reference/extensions.md#optional-rendering-extensions) during application startup when an empty generator should select `{{^items}}...{{/items}}`.
+Python iterators and asynchronous iterables are streaming section sources. By default, Chevron follows ordinary Python truthiness for them: an iterator object is truthy even when it has no remaining items. Enable [`Extension.ENHANCED_ITERATORS`](../reference/extensions.md#enhanced-iterators) during application startup when an empty generator should select `{{^items}}...{{/items}}`.
 
 With that extension enabled, Chevron uses one cursor for an iterator name in its supplying context during a render. An inverted section may advance one item to determine whether that cursor is empty; it retains that item for a later ordinary section and does not materialise the rest of the source. A recognised iterator or asynchronous iterable can then be traversed only once in a render: once Chevron exhausts a non-empty cursor, later ordinary sections render no items rather than restarting it. Its non-empty result remains stable for inverted sections, so it does not become a fallback merely because an earlier ordinary section consumed it. Lists and tuples retain their normal repeatable section behaviour. `async_render()` applies the same rule to asynchronous iterables.
 
