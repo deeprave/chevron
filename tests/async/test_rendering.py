@@ -2,7 +2,7 @@
 
 from io import StringIO
 import logging
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterable, AsyncIterator, Callable, Sequence
 import sys
 from typing import overload
 
@@ -12,6 +12,7 @@ import chevron
 from async_support import ANYIO_BACKENDS
 from chevron import ChevronError, Extension
 from async_cases import (
+    ASYNC_CONDITIONAL_SECTION_CASES,
     ASYNC_ITERATION_METADATA_CASES,
     ASYNC_ITERATOR_DEFAULT_CASES,
     ASYNC_ITERATOR_EXTENSION_CASES,
@@ -20,9 +21,11 @@ from filesystem_partial_cases import FILESYSTEM_PARTIAL_CASES
 from rendering_case_sets import ASYNC_RENDER_CASES
 from rendering_cases import FilesystemPartialRenderCase, LambdaRenderCase, RenderCase
 from section_cases import (
+    CONDITIONAL_SECTION_CASES,
     ITERATION_METADATA_CASES,
     ITERATOR_DEFAULT_CASES,
     ITERATOR_EXTENSION_CASES,
+    ConditionalCallable,
 )
 from token_cases import MALFORMED_RESERVED_TAG_TEMPLATES, TOKEN_VALIDATION_CASES
 
@@ -37,6 +40,22 @@ class _CallerOwnedItems:
     async def items(self) -> AsyncIterator[str]:
         yield "first"
         yield "second"
+
+
+class _SizedAsyncConditionalItems(AsyncIterable[str]):
+    def __init__(self) -> None:
+        self.aiter_calls = 0
+
+    def __len__(self) -> int:
+        return 1
+
+    def __aiter__(self) -> AsyncIterator[str]:
+        self.aiter_calls += 1
+        return self.items()
+
+    async def items(self) -> AsyncIterator[str]:
+        if False:
+            yield "unreachable"
 
 
 @pytest.mark.anyio
@@ -58,6 +77,71 @@ async def test_async_rendering_case(anyio_backend: str, case: RenderCase) -> Non
         )
         == case.expected
     )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+@pytest.mark.parametrize(
+    "case",
+    CONDITIONAL_SECTION_CASES + ASYNC_CONDITIONAL_SECTION_CASES,
+    ids=lambda case: case.name,
+)
+async def test_async_conditional_section_case(
+    anyio_backend: str, enable_extensions: Callable[..., None], case: RenderCase
+) -> None:
+    enable_extensions(Extension.CONDITIONAL_SECTIONS)
+
+    assert (
+        await chevron.async_render(
+            case.template,
+            case.render_data(),
+            partials_dict=case.partials,
+            scopes=case.scopes,
+            def_ldel=case.initial_delimiters[0],
+            def_rdel=case.initial_delimiters[1],
+        )
+        == case.expected
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_conditional_section_does_not_invoke_a_callable(
+    anyio_backend: str, enable_extensions: Callable[..., None]
+) -> None:
+    enable_extensions(Extension.CONDITIONAL_SECTIONS)
+    callback = ConditionalCallable()
+
+    assert (
+        await chevron.async_render(
+            "{{?callback}}shown{{/callback}}", {"callback": callback}
+        )
+        == "shown"
+    )
+    assert callback.calls == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_conditional_section_does_not_probe_a_sized_iterable(
+    anyio_backend: str, enable_extensions: Callable[..., None]
+) -> None:
+    enable_extensions(Extension.CONDITIONAL_SECTIONS)
+    items = _SizedAsyncConditionalItems()
+
+    assert (
+        await chevron.async_render("{{?items}}shown{{/items}}", {"items": items})
+        == "shown"
+    )
+    assert items.aiter_calls == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("anyio_backend", ANYIO_BACKENDS)
+async def test_async_disabled_conditional_prefix_is_an_ordinary_variable(
+    anyio_backend: str,
+) -> None:
+    assert await chevron.async_render("{{?enabled}}", {"?enabled": "shown"}) == "shown"
 
 
 @pytest.mark.anyio

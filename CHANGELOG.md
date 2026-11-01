@@ -8,10 +8,15 @@ All notable changes to Chevron are documented in this file.
 
 - `Extension.ENHANCED_ITERATORS` opt-in support allows empty synchronous and asynchronous iterators to select their paired inverted section.
 - This also exposes `.first`, `.last`, `.index`, `.ordinal`, and `.length` within repeated sections, plus `.0`, `.1`, and later values for sized indexable sources.
+- `Extension.CONDITIONAL_SECTIONS` opt-in support adds `{{?name}}...{{/name}}`, which conditionally renders a body once without changing the active context or iterating the value.
 
 ### Fixed
 
 - Removed the undocumented `_CHEVRON_return_scope_when_falsy` template-data escape hatch. Custom falsey values now follow ordinary falsey rendering behaviour.
+
+### Changed
+
+- `Extension.ALL` now includes `Extension.CONDITIONAL_SECTIONS`; applications using that mask reserve `?` for conditional-section syntax rather than literal variable names beginning with `?`.
 
 ## [0.17.1] - 2026-10-28
 

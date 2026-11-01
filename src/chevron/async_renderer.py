@@ -54,6 +54,7 @@ from .renderer import (
     _restore_enclosing_padding,
     _consume_parent_suffix,
     _restore_parent_suffix,
+    _section_value_is_empty,
     _push_work,
     _prepare_render_context,
     _read_template_result,
@@ -239,7 +240,12 @@ class AsyncChevronRender:
             template = await self._read_template(template)
             if not template and not isinstance(template, str):
                 template = ""
-            tokens = _tokenize(template, *frame.delimiters, include_raw=True)
+            tokens = _tokenize(
+                template,
+                *frame.delimiters,
+                include_raw=True,
+                diagnostic=self.config.logger.warning,
+            )
         return _RenderWork[Awaitable[None]](
             tokens,
             frame,
@@ -414,13 +420,10 @@ class AsyncChevronRender:
             return
         if isinstance(value, AsyncIterable):
             assert binding_frame is not None
+            state = binding_frame.async_iterator_states.get(key)
             async_values = (
-                self._async_iterator_state(
-                    binding_frame,
-                    key,
-                    value,
-                )
-                if use_enhanced_iterators
+                self._async_iterator_state(binding_frame, key, value)
+                if use_enhanced_iterators or state is not None
                 else aiter(value)
             )
         if async_values is not None:
@@ -435,13 +438,19 @@ class AsyncChevronRender:
                 if result is not None:
                     work.append(result, terminal_padding=terminal_padding)
                 try:
+                    assert binding_frame is not None
+                    state = binding_frame.async_iterator_states.get(key)
+                    active_values = cast(
+                        _AsyncIteratorState | AsyncIterator[TemplateData],
+                        state if state is not None else async_values,
+                    )
                     if not use_enhanced_iterators:
-                        item = await anext(async_values)
+                        item = await anext(active_values)
                         last = None
-                    elif isinstance(async_values, _AsyncIteratorState):
-                        item, last = await async_values.next_with_last()
+                    elif isinstance(active_values, _AsyncIteratorState):
+                        item, last = await active_values.next_with_last()
                     else:
-                        item = await anext(async_values)
+                        item = await anext(active_values)
                         last = None
                 except StopAsyncIteration:
                     return
@@ -454,31 +463,23 @@ class AsyncChevronRender:
                     index - 1,
                     last,
                 )
-                _push_work(
-                    active,
-                    _RenderWork.from_tokens(
-                        iter(body.tokens),
-                        child,
-                        render_next,
-                        source_line_has_content=work.source_line_has_content,
-                    ),
+                next_work = _RenderWork.from_tokens(
+                    iter(body.tokens),
+                    child,
+                    render_next,
+                    source_line_has_content=work.source_line_has_content,
                 )
+                _push_work(active, next_work)
 
             await render_next()
             return
         if isinstance(value, (Sequence, Iterator)) and not isinstance(value, str):
             assert binding_frame is not None
+            state = binding_frame.iterator_states.get(key)
             sync_values = (
-                (
-                    _iterator_state(
-                        binding_frame,
-                        key,
-                        value,
-                    )
-                    if use_enhanced_iterators
-                    else iter(value)
-                )
+                _iterator_state(binding_frame, key, value)
                 if isinstance(value, Iterator)
+                and (use_enhanced_iterators or state is not None)
                 else iter(value)
             )
         else:
@@ -496,13 +497,19 @@ class AsyncChevronRender:
             if result is not None:
                 work.append(result, terminal_padding=terminal_padding)
             try:
+                state = (
+                    binding_frame.iterator_states.get(key)
+                    if isinstance(value, Iterator)
+                    else None
+                )
+                active_values = state if state is not None else sync_values
                 if not use_enhanced_iterators:
-                    item = next(sync_values)
+                    item = next(active_values)
                     last = None
-                elif isinstance(sync_values, _IteratorState):
-                    item, last = sync_values.next_with_last()
+                elif isinstance(active_values, _IteratorState):
+                    item, last = active_values.next_with_last()
                 else:
-                    item = next(sync_values)
+                    item = next(active_values)
                     last = None
             except StopIteration:
                 return
@@ -515,18 +522,57 @@ class AsyncChevronRender:
                 index - 1,
                 last,
             )
-            _push_work(
-                active,
-                _RenderWork.from_tokens(
-                    iter(body.tokens),
-                    child,
-                    render_next,
-                    source_line_has_content=work.source_line_has_content,
-                ),
+            next_work = _RenderWork.from_tokens(
+                iter(body.tokens),
+                child,
+                render_next,
+                source_line_has_content=work.source_line_has_content,
             )
+            _push_work(active, next_work)
 
         await render_next()
         return
+
+    async def _render_conditional_section(
+        self,
+        key: str,
+        work: _RenderWork[Awaitable[None]],
+        active: list[_RenderWork[Awaitable[None]]],
+    ) -> None:
+        """Render one body when its value is truthy without changing scope."""
+        body = await self.collect_section(work.tokens, key, work.delimiters)
+        work.delimiters = body.ending
+        value, _, binding_frame = self.resolve(key, work.frame)
+        if not value:
+            return
+        if isinstance(value, (Callable, Sized)):
+            is_empty = False
+        elif isinstance(value, AsyncIterable) and binding_frame is not None:
+            state = binding_frame.async_iterator_states.get(key)
+            is_empty = (
+                await cast(_AsyncIteratorState, state).probe()
+                if state is not None
+                else await self._async_iterator_state(binding_frame, key, value).probe()
+            )
+        else:
+            is_empty = _section_value_is_empty(
+                value, binding_frame, key, observe_stream=True
+            )
+        if is_empty:
+            return
+        frame = work.frame.with_context(body.opening, work.frame.padding)
+
+        async def append_result(result: str, terminal_padding: str) -> None:
+            work.append(result, terminal_padding=terminal_padding)
+
+        conditional_work = _RenderWork.from_tokens(
+            iter(body.tokens),
+            frame,
+            append_result,
+            source_line_has_content=work.source_line_has_content,
+        )
+        conditional_work.copy_line_state_from(work)
+        _push_work(active, conditional_work)
 
     async def _render_partial(
         self,
@@ -698,35 +744,42 @@ class AsyncChevronRender:
                 await self._render_interpolation(key, tag, work, active)
             case "section":
                 await self._render_section(key, work, active)
+            case "conditional section":
+                if not Extension.is_enabled(Extension.CONDITIONAL_SECTIONS):
+                    raise ChevronError(
+                        "Conditional sections require "
+                        "Extension.CONDITIONAL_SECTIONS to be enabled"
+                    )
+                await self._render_conditional_section(key, work, active)
             case "inverted section":
                 use_enhanced_iterators = Extension.is_enabled(
                     Extension.ENHANCED_ITERATORS
                 )
-                value, _, binding_frame = self.policy.resolve(
-                    key, work.frame, lambda value: _normalise_value(key, value)
-                )
+                value, _, binding_frame = self.resolve(key, work.frame)
                 if not value:
                     is_empty = True
-                elif isinstance(value, Callable):
+                elif isinstance(value, (Callable, Sized)):
                     is_empty = False
-                elif isinstance(value, Sized):
-                    is_empty = False
-                elif use_enhanced_iterators and isinstance(value, AsyncIterable):
-                    assert binding_frame is not None
-                    is_empty = await self._async_iterator_state(
-                        binding_frame,
-                        key,
-                        value,
-                    ).probe()
-                elif use_enhanced_iterators and isinstance(value, Iterator):
-                    assert binding_frame is not None
-                    is_empty = _iterator_state(
-                        binding_frame,
-                        key,
-                        value,
-                    ).probe()
+                elif isinstance(value, AsyncIterable) and binding_frame is not None:
+                    state = binding_frame.async_iterator_states.get(key)
+                    is_empty = (
+                        await cast(_AsyncIteratorState, state).probe()
+                        if state is not None
+                        else (
+                            await self._async_iterator_state(
+                                binding_frame, key, value
+                            ).probe()
+                            if use_enhanced_iterators
+                            else False
+                        )
+                    )
                 else:
-                    is_empty = False
+                    is_empty = _section_value_is_empty(
+                        value,
+                        binding_frame,
+                        key,
+                        observe_stream=use_enhanced_iterators,
+                    )
                 work.frame = work.frame.child(
                     _INVERTED_SECTION_MARKER if is_empty else _SKIPPED_SECTION_MARKER
                 )

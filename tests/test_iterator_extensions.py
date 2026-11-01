@@ -49,6 +49,16 @@ def test_extensions_can_be_enabled_as_a_group(
 
     enable_extensions(Extension.ALL)
     assert Extension.is_enabled(Extension.ENHANCED_ITERATORS)
+    assert Extension.is_enabled(Extension.CONDITIONAL_SECTIONS)
+
+
+def test_conditional_sections_can_be_enabled_without_enhanced_iterators(
+    enable_extensions: Callable[..., None],
+) -> None:
+    enable_extensions(Extension.CONDITIONAL_SECTIONS)
+
+    assert Extension.is_enabled(Extension.CONDITIONAL_SECTIONS)
+    assert not Extension.is_enabled(Extension.ENHANCED_ITERATORS)
 
 
 def test_extensions_are_immutable_after_configuration(

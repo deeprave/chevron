@@ -14,6 +14,8 @@ Extension.enable(Extension.ENHANCED_ITERATORS)
 
 `ENHANCED_ITERATORS` makes an empty Python iterator or async iterable select its paired inverted section, just as an empty list does. Within a repeated section it also exposes `.first`, `.last`, `.index`, `.ordinal`, and `.length`; sized, indexable sources additionally expose `.0`, `.1`, and later values. It gives a streaming source one cursor for the render, retaining only the bounded lookahead needed for inversion and last-item metadata. See [sections](../language/sections.md#iterators-and-generators) for the template contract.
 
+`CONDITIONAL_SECTIONS` enables `{{?name}}...{{/name}}`, which tests `name` and renders its body once without changing the active context or iterating the value. It is independent of `ENHANCED_ITERATORS`; enable it alone when templates need only conditional sections, or combine both flags when they need both extensions. Without this extension, `?` remains part of an ordinary variable name. See [conditional sections](../language/sections.md#conditional-sections).
+
 Enable every extension implemented by the installed Chevron version with `Extension.ALL`:
 
 ```python

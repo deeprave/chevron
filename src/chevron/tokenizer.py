@@ -1,6 +1,9 @@
-from collections.abc import Generator
-from dataclasses import dataclass
+from collections.abc import Callable, Generator
+from dataclasses import dataclass, field
+import logging
 from typing import TypeAlias
+
+from .extensions import Extension
 
 Token: TypeAlias = tuple[str, str] | tuple[str, str, str]
 RawToken: TypeAlias = tuple[str, str, str]
@@ -16,6 +19,7 @@ class _TokenizationState:
 
     current_line: int = 1
     last_tag_line: int | None = None
+    conditional_candidates: set[str] = field(default_factory=set)
 
 
 def _line_break_count(text: str) -> int:
@@ -109,6 +113,8 @@ def parse_tag(
         "{": "no escape?",
         "&": "no escape",
     }
+    if Extension.is_enabled(Extension.CONDITIONAL_SECTIONS):
+        tag_types["?"] = "conditional section"
 
     # Get the tag
     try:
@@ -161,6 +167,7 @@ def tokenize(
     def_ldel: str = "{{",
     def_rdel: str = "}}",
     include_raw: bool = False,
+    diagnostic: Callable[[str], None] | None = None,
 ) -> Generator[Token, None, None]:
     """Tokenize a mustache template
 
@@ -182,6 +189,9 @@ def tokenize(
                    as a third tuple item (defaults to False). The default
                    stream remains `(tag_type, tag_key)` for existing callers.
 
+    diagnostic -- Optional callback for tokenisation diagnostics. Renderers use
+                  this to route warnings through their configured logger.
+
 
     Returns:
 
@@ -197,6 +207,7 @@ def tokenize(
      * literal
      * section
      * inverted section
+     * conditional section
      * end
      * partial
      * parent
@@ -230,6 +241,18 @@ def tokenize(
     def token(token_type: str, token_key: str, raw: str) -> RawToken:
         return (token_type, token_key, raw)
 
+    def warn_conditional_candidate(key: str) -> None:
+        if key not in state.conditional_candidates:
+            return
+        message = (
+            "Conditional-looking section "
+            f"'?{key}' requires Extension.CONDITIONAL_SECTIONS to be enabled"
+        )
+        if diagnostic is not None:
+            diagnostic(message)
+        else:
+            logging.getLogger("chevron").warning(message)
+
     while template:
         literal, template = grab_literal(template, l_del, state)
         raw_literal = literal
@@ -250,6 +273,9 @@ def tokenize(
         tag_type, tag_key = tag
         raw_tag = l_del + raw_tag[: len(raw_tag) - len(template)]
 
+        if tag_type == "variable" and tag_key.startswith("?"):
+            state.conditional_candidates.add(tag_key[1:])
+
         # Special tag logic
 
         # If we are a set delimiter tag
@@ -259,7 +285,13 @@ def tokenize(
             l_del, r_del = dels[0], dels[-1]
 
         # If we are a section tag
-        elif tag_type in ["section", "inverted section", "parent", "block"]:
+        elif tag_type in [
+            "section",
+            "inverted section",
+            "conditional section",
+            "parent",
+            "block",
+        ]:
             # Then open a new section
             open_sections.append(tag_key)
             state.last_tag_line = state.current_line
@@ -271,6 +303,7 @@ def tokenize(
             try:
                 last_section = open_sections.pop()
             except IndexError:
+                warn_conditional_candidate(tag_key)
                 raise ChevronError(
                     f'Trying to close tag "{tag_key}"\n'
                     "Looks like it was not opened.\n"
@@ -278,6 +311,7 @@ def tokenize(
                 )
             if tag_key != last_section:
                 # Otherwise we need to complain
+                warn_conditional_candidate(tag_key)
                 raise ChevronError(
                     f'Trying to close tag "{tag_key}"\n'
                     f'last open tag is "{last_section}"\n'

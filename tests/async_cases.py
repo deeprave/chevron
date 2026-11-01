@@ -151,6 +151,22 @@ ASYNC_ITERABLE_CASES = (
 )
 
 
+ASYNC_CONDITIONAL_SECTION_CASES = (
+    RenderCase(
+        name="conditional section preserves an async streaming item for an ordinary section",
+        template="{{?items}}ready{{/items}}{{#items}}[{{.}}]{{/items}}",
+        data_factory=lambda: {"items": _many_items()},
+        expected="ready[first][second][third]",
+    ),
+    RenderCase(
+        name="conditional section skips an empty async streaming iterator",
+        template="{{?items}}ready{{/items}}",
+        data_factory=lambda: {"items": _empty_items()},
+        expected="",
+    ),
+)
+
+
 ASYNC_ITERATOR_DEFAULT_CASES = (
     RenderCase(
         name="disabled async iterator extension leaves a non-empty iterable unconsumed",
